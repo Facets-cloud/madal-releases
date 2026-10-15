@@ -110,8 +110,10 @@ madal team add design carol@example.com
 madal team remove design carol@example.com      # rotates the team key
 ```
 
-You can share with anyone's email. If they don't use Madal yet they're invited: send them the
-link, and the share completes once they sign up and your `madal` next runs.
+You can share with anyone's email. If they don't use Madal yet they're invited, and madal prints
+an invite link for each person. Send each one their own link: it opens as soon as they sign up
+with that email, even if your machine is off. The link carries a secret that only works for that
+email's account, and the server never sees it.
 
 The first time you share with someone, madal shows their **key fingerprint**. Compare it with what
 `madal whoami` shows them, over a channel you trust, to be sure the server handed you their real
