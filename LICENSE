@@ -1,0 +1,28 @@
+madal license
+
+Copyright (c) 2026 Pramodh Ayyappan. All rights reserved.
+
+You may download and use the madal command-line tool, its agent skill and the madal
+service, free of charge, for personal or commercial work. What you publish with madal stays
+yours.
+
+You may not:
+
+- sell, rent, sublicense or redistribute the madal software, in whole or in part, other than
+  by pointing people to the official downloads;
+- reverse engineer, decompile or disassemble it, except where the law allows this despite
+  this restriction;
+- remove or change this notice or the copyright notices in the software.
+
+The madal software includes open-source components under their own licences. They are
+listed, with their full terms, in THIRD_PARTY_NOTICES. Those terms govern those components,
+and nothing here limits them.
+
+Versions released before 13 October 2026 (v0.1.10 and earlier) were published under the
+Apache License 2.0 and remain available under that licence.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
