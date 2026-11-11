@@ -429,9 +429,40 @@ of N" menu listing the kept ones. Each pick opens in a new sandboxed frame. If a
 asks for it again. A slow earlier pick never replaces a later one. `madal get <link> --version n`
 does the same from the CLI.
 
+## Comments
+
+Agreed 2026-11-11. Readers comment on a page inside the viewer: on a passage, a whole element or a
+dragged area, with one level of replies. Comments are sealed with a key derived from the page's
+key, so whoever can read the page can read its comments and the server can't:
+
+```
+CK     = HKDF-SHA256(K[key_gen], info = "madal/v1/comment", 32 bytes)
+body   = "MDC1" || nonce12 || AES-256-GCM(CK, nonce, JSON {text, anchor}, aad)
+aad    = "madal/v1/comment/" + artifact id + "/" + version + "/" + comment id + "/" + parent id
+proof  = base64url(HKDF-SHA256(K, info = "madal/v1/comment-auth/" + artifact id))
+anchor = {exact, prefix, suffix}                      a passage (W3C text quote)
+       | {pin: {path, tag, x, y, w, h, ew}}           an element or area, as fractions of the element
+```
+
+- The comment id is chosen by the browser because it's in the AAD; the parent id binds a reply to
+  its thread. The server can't move a comment to another page, version, id or thread.
+- The anchor is inside the ciphertext, since a quoted passage is page content. The frame finds it
+  again in whatever version is shown; one it can't find shows as outdated, never deleted.
+- Commenting needs a signed-in, verified account. Private pages check the reader's grant. A link
+  page's readers also send the proof, and the server keeps only its SHA-256, set by the owner's
+  browser the first time the owner opens the page, so knowing a page id isn't enough. Public and
+  password-protected pages take no comments.
+- The server stores the author, the version, the key generation, the time and whether a thread is
+  resolved, and who resolved it. Only a thread's author resolves or reopens it; once that account is
+  deleted, the page's owner can. Deleting an account keeps its comments without an author.
+- Comment text never enters the sandboxed frame, where the page's own scripts run. The frame reports
+  positions (selection, clicks, element boxes) and paints highlights with the CSS Custom Highlight
+  API; the viewer draws tooltips, cards, regions and markers above it and treats everything from the
+  frame as untrusted.
+
 ## Out of scope for v0
 
-Blog mode, workspaces, comments, live updates, remote MCP, the verifier extension, paid plans and
+Blog mode, workspaces, live updates, remote MCP, the verifier extension, paid plans and
 `install --harness all`. See the task brief.
 
 ## Known limits
