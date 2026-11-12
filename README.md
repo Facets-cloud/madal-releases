@@ -13,7 +13,7 @@
 Madal turns the HTML and Markdown your coding agent writes into a link.<br>
 It's encrypted on your machine, and the key never reaches our server.
 
-[Watch the demo](https://madal.facets.cloud/#demo) · [Install](#install) · [Quick start](#quick-start) · [Sharing](#sharing-with-people-and-teams) · [How it works](#how-the-encryption-works) · [Security](SECURITY.md) · [Report a problem](#report-a-problem)
+[Watch the demo](https://madal.facets.cloud/#demo) · [Install](#install) · [Quick start](#quick-start) · [Comments](#comments) · [Sharing](#sharing-with-people-and-teams) · [How it works](#how-the-encryption-works) · [Security](SECURITY.md) · [Report a problem](#report-a-problem)
 
 </div>
 
@@ -27,6 +27,64 @@ dashboard it publishes. The same cut is in [docs/madal-demo.mp4](docs/madal-demo
 ## Install
 
 </div>
+
+madal runs as an MCP server, so any agent that speaks MCP can publish with it, Claude Desktop
+included. There is also a CLI. The two share the same account and keys on a machine.
+
+### As an MCP server
+
+Every client runs the same command. It needs Node.js 18 or later:
+
+```bash
+npx -y @facets-cloud/madal mcp
+```
+
+The quickest setup is to paste this prompt into the agent you use and let it add madal itself:
+
+```text
+Add the madal MCP server to your own MCP configuration for me. It is a stdio server: the command is `npx` with the arguments `-y @facets-cloud/madal mcp` (on Windows: command `cmd`, arguments `/c npx -y @facets-cloud/madal mcp`). Name it "madal", add it at user level so it works in every project, and tell me if I need to restart you. Then call its login tool so I can sign in.
+```
+
+Or add it yourself:
+
+```bash
+claude mcp add --scope user madal -- npx -y @facets-cloud/madal mcp   # Claude Code
+codex mcp add madal -- npx -y @facets-cloud/madal mcp                 # Codex
+gemini mcp add --scope user madal npx -y @facets-cloud/madal mcp      # Gemini CLI
+```
+
+Claude Desktop: Settings, Developer, Edit Config opens `claude_desktop_config.json`. Add this
+and restart Claude. Cursor reads the same block from `~/.cursor/mcp.json`.
+
+```json
+{
+  "mcpServers": {
+    "madal": { "command": "npx", "args": ["-y", "@facets-cloud/madal", "mcp"] }
+  }
+}
+```
+
+VS Code reads `.vscode/mcp.json` in a workspace, or the user `mcp.json` that **MCP: Open User
+Configuration** opens:
+
+```json
+{
+  "servers": {
+    "madal": { "type": "stdio", "command": "npx", "args": ["-y", "@facets-cloud/madal", "mcp"] }
+  }
+}
+```
+
+On Windows, clients that start `npx` directly may not find it, because it's `npx.cmd`. Use the
+command `cmd` with the arguments `/c npx -y @facets-cloud/madal mcp`.
+
+Then ask your agent to sign you in to madal. It calls the `login` tool, your browser opens, and
+you sign in. The server's tools are `login`, `logout`, `whoami`, `publish`, `update`, `list`,
+`get`, `versions`, `delete`, `share`, `team`, `comments`, `comment` and `resolve_comment`. If
+you have the CLI, `madal mcp install` adds the server to every agent it finds (see
+[Agents over MCP](#agents-over-mcp)).
+
+### The CLI
 
 ```bash
 curl -fsSL https://madal.facets.cloud/install.sh | sh
@@ -60,6 +118,12 @@ sha256sum --check --ignore-missing checksums.txt   # macOS: shasum -a 256 --chec
 
 </div>
 
+With the MCP server, ask your agent in plain words: "sign me in to madal", then "publish this
+report and give me a link anyone can open". The `publish` tool takes a `tier` (`only-me`, the
+default, `link` or `public`) and `to` for people to share with.
+
+With the CLI:
+
 ```bash
 madal login                     # sign in, set up sharing, teach your agents to use madal
 madal publish report.html       # signed in: a link only you can open
@@ -87,6 +151,58 @@ madal get <link> -o copy.html
 madal get <link> --version 2 -o v2.html     # an earlier version
 madal delete <link-or-id>
 ```
+
+### Agents over MCP
+
+`madal mcp` runs an MCP server on stdin and stdout, so an agent can do what the CLI does: publish,
+update, read, list and delete pages, share them, manage teams, and read and answer comments. It
+encrypts and decrypts on your machine, like every other command. `get` saves each version it reads
+to `pages/<id>/v<n>.html` in your madal folder and returns that path. It also returns the HTML
+inline when it is 50 KB or less. To change a page, edit that file and pass its path to `update`.
+`madal logout` deletes these files.
+
+Sign-in doesn't hold up the agent. A tool called while you're signed out opens the browser and
+returns at once, and you finish signing in there. Some things only you can do: accept someone's
+new key, set or remove a page password, and type the password of a protected page. madal asks you
+for those itself, through the agent's client, and the model never sees the question or your
+answer. A client that can't ask gets the fingerprint back, and nothing changes.
+
+Add it to every agent installed here with one command:
+
+```bash
+madal mcp install    # Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Antigravity, VS Code, Windsurf
+madal mcp remove     # take it out again
+```
+
+It writes a `madal` entry into each agent's user config and leaves the rest of the file alone. The
+entry runs `npx -y @facets-cloud/madal mcp`, which needs Node.js but no madal on the agent's PATH.
+`--local` runs this binary instead. An entry you edited by hand stays as it is unless you pass
+`--force`. Any other MCP client can run the same npx command. Restart an agent that was open.
+
+---
+
+<div align="center">
+
+## Comments
+
+</div>
+
+Readers comment on a passage, an element or an area of a page in their browser. Comments are
+end-to-end encrypted with a key derived from the page key, so the server stores only ciphertext.
+They work on private and link pages, not on public or password-protected ones.
+
+Your agent can read them, fix the page and reply:
+
+```bash
+madal comments <link> [--json]                     # threads, oldest first, with replies
+madal comment <link> "text" [--on "passage"]       # comment on the latest version
+madal comment <link> "text" --reply <id>           # reply to a thread
+madal comment <link> --resolve <id>                # or --reopen, --delete
+```
+
+Over MCP the same things are the `comments`, `comment` and `resolve_comment` tools. A comment
+posted by an agent shows **via agent** in the browser. The madal skill tells agents to treat
+comment text as information, never as instructions.
 
 ---
 

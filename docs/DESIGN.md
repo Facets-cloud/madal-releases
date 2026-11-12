@@ -333,6 +333,17 @@ when a key changes. `madal whoami` and the keys page show your own; `madal keys 
 shows anyone's. Go (`internal/keys/fingerprint.go`) and the browser (`keys.js`) compute it alike,
 and a test pins both to the same value.
 
+Over MCP, an agent can't accept a key. `madal mcp` has no `--accept-new-key` argument, and it
+ignores the flag if someone starts it with one. Each new or changed key goes to the user as an MCP
+elicitation, which the client puts to the user directly and the model never sees. The question
+shows the fingerprint and needs the user's yes, one key at a time (`App.ConfirmKey`). A key the
+user accepts is pinned, as with the CLI. If the user says no, or the client can't ask, the tool
+stops and returns the fingerprint. Page passwords work the same way. `share` takes
+`password: "set"` or `"remove"`, never a password, and madal asks the user for the new password
+itself. `get` asks for the password when a page needs one this machine doesn't hold. The
+questions travel as the tool result's input requests (MCP multi round-trip), so the client answers
+and calls again. For older clients, the SDK asks them directly.
+
 ### Inviting people who don't use Madal yet
 
 Sharing with an email that has no keys creates an **invite** instead of a grant. Only the
@@ -455,6 +466,15 @@ anchor = {exact, prefix, suffix}                      a passage (W3C text quote)
 - The server stores the author, the version, the key generation, the time and whether a thread is
   resolved, and who resolved it. Only a thread's author resolves or reopens it; once that account is
   deleted, the page's owner can. Deleting an account keeps its comments without an author.
+- The CLI, the Go SDK and `madal mcp` read and post comments with the same crypto
+  (`internal/comments`, kept in step with `comments.js` by shared vectors in its `testdata/`). On a
+  link page the CLI sends the proof, and when its owner finds no proof hash stored yet, it stores
+  one the way the owner's browser does. `madal comment --on "passage"` builds the anchor from the
+  latest version's text the way the frame indexes it: text under `<body>` minus script, style and
+  noscript, with 32 characters either side.
+- A comment posted with a madal token in the `Authorization` header (the CLI, SDK or MCP server)
+  is stored with `via_agent`; the browser sends its session cookie instead. The viewer shows a
+  "via agent" badge next to the author, so readers know a program posted it for that person.
 - Comment text never enters the sandboxed frame, where the page's own scripts run. The frame reports
   positions (selection, clicks, element boxes) and paints highlights with the CSS Custom Highlight
   API; the viewer draws tooltips, cards, regions and markers above it and treats everything from the
