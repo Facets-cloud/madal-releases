@@ -101,6 +101,8 @@ To upgrade later:
 ```bash
 madal upgrade           # also refreshes the agent skill, which ships inside the binary
 madal upgrade --check   # only say whether a newer release exists
+madal changelog         # what this release changed, and every newer one
+madal changelog --since v0.1.25   # everything after v0.1.25
 ```
 
 Every release is built by GitHub Actions from a tagged commit. To check a download yourself,
