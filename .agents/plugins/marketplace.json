@@ -1,0 +1,20 @@
+{
+  "name": "madal",
+  "interface": {
+    "displayName": "madal"
+  },
+  "plugins": [
+    {
+      "name": "madal",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

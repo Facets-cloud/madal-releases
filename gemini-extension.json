@@ -1,0 +1,16 @@
+{
+  "name": "madal",
+  "version": "0.2.0",
+  "description": "Publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "madal": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@facets-cloud/madal",
+        "mcp"
+      ]
+    }
+  }
+}

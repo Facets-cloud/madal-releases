@@ -1,0 +1,19 @@
+{
+  "name": "madal",
+  "owner": {
+    "name": "Facets.cloud",
+    "url": "https://madal.facets.cloud"
+  },
+  "metadata": {
+    "description": "Publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
+    "version": "0.2.0"
+  },
+  "plugins": [
+    {
+      "name": "madal",
+      "source": "./",
+      "description": "Publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
+      "version": "0.2.0"
+    }
+  ]
+}

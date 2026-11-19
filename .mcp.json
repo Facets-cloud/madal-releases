@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "madal": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@facets-cloud/madal",
+        "mcp"
+      ]
+    }
+  }
+}
