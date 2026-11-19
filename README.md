@@ -28,8 +28,38 @@ dashboard it publishes. The same cut is in [docs/madal-demo.mp4](docs/madal-demo
 
 </div>
 
-madal runs as an MCP server, so any agent that speaks MCP can publish with it, Claude Desktop
-included. There is also a CLI. The two share the same account and keys on a machine.
+The quickest way is to paste this prompt into your coding agent. It installs madal the way that
+fits that agent: the plugin for Claude Code, Gemini CLI and Antigravity, the MCP server for any
+other agent. Then it signs you in.
+
+```text
+Install madal for me. If you are Claude Code, run `claude plugin marketplace add Facets-cloud/madal-releases` and then `claude plugin install madal@madal`. If you are Gemini CLI, run `gemini extensions install https://github.com/Facets-cloud/madal-releases`. If you are Antigravity, run `agy plugin install https://github.com/Facets-cloud/madal-releases`. Otherwise, add a stdio MCP server named "madal" at user level, so it works in every project: the command is `npx` with the arguments `-y @facets-cloud/madal mcp` (on Windows: command `cmd`, arguments `/c npx -y @facets-cloud/madal mcp`). Tell me if I need to restart you. Then call madal's login tool so I can sign in.
+```
+
+To do it yourself, use the plugin if your agent takes one. One install adds the MCP server and
+the madal skill. Any other agent that speaks MCP, Claude Desktop's Chat tab included, can run the
+MCP server on its own. There is also a CLI. All of them share the same account and keys on a
+machine. The home page's [install box](https://madal.facets.cloud/#install) has the same options.
+
+### As an agent plugin
+
+The plugin bundles the MCP server and the madal skill, so the agent knows when to publish
+without being told. The server runs through npx, so restarting the agent picks up a new madal;
+the skill updates with the plugin. It needs Node.js 18 or later. Add it with the line
+for your agent:
+
+```bash
+claude plugin marketplace add Facets-cloud/madal-releases && claude plugin install madal@madal   # Claude Code
+gemini extensions install https://github.com/Facets-cloud/madal-releases   # Gemini CLI
+agy plugin install https://github.com/Facets-cloud/madal-releases          # Antigravity
+```
+
+Claude Desktop: Customize, Plugins, add a marketplace from the GitHub repo
+`Facets-cloud/madal-releases`. The skill loads in every tab, the MCP server only in Cowork and
+Code, so Chat still needs the MCP setup below.
+
+Most agents don't update plugins on their own. Claude Code updates a third-party marketplace
+only if you turn auto-update on for it; Gemini CLI has `gemini extensions update`.
 
 ### As an MCP server
 
@@ -39,13 +69,7 @@ Every client runs the same command. It needs Node.js 18 or later:
 npx -y @facets-cloud/madal mcp
 ```
 
-The quickest setup is to paste this prompt into the agent you use and let it add madal itself:
-
-```text
-Add the madal MCP server to your own MCP configuration for me. It is a stdio server: the command is `npx` with the arguments `-y @facets-cloud/madal mcp` (on Windows: command `cmd`, arguments `/c npx -y @facets-cloud/madal mcp`). Name it "madal", add it at user level so it works in every project, and tell me if I need to restart you. Then call its login tool so I can sign in.
-```
-
-Or add it yourself:
+Add it with your agent's command, or to its MCP config file:
 
 ```bash
 claude mcp add --scope user madal -- npx -y @facets-cloud/madal mcp   # Claude Code
@@ -87,6 +111,17 @@ you have the CLI, `madal mcp install` adds the server to every agent it finds (s
 ### The CLI
 
 ```bash
+npm install -g @facets-cloud/madal
+```
+
+npm installs the one prebuilt binary that matches your OS and CPU, with no install script. It
+needs Node.js 18 or later. Then run `madal login`. To upgrade it, run the same command again.
+
+#### Other ways to install
+
+Without Node.js, use the install script:
+
+```bash
 curl -fsSL https://madal.facets.cloud/install.sh | sh
 ```
 
@@ -96,7 +131,15 @@ The script downloads the release for your OS and CPU, checks its SHA-256 against
 
 On Windows, download the zip from [Releases](https://github.com/Facets-cloud/madal-releases/releases).
 
-To upgrade later:
+madal keeps itself up to date. Once a day it checks for a newer release; when there is one, a
+background process downloads it, checks the release's signed `checksums.txt` against a key built
+into madal, and swaps the binary, so the next command runs the new version and prints
+`madal updated to vX.Y.Z`. A command never waits for this, and a release whose signature or
+checksum doesn't match is refused. Turn it off with `madal upgrade --auto off` or
+`MADAL_NO_AUTO_UPDATE=1`; madal then only says when a newer release is out. Copies installed
+through npm update through npx instead: restart the agent to pick up a new release.
+
+To upgrade by hand:
 
 ```bash
 madal upgrade           # also refreshes the agent skill, which ships inside the binary
@@ -223,8 +266,12 @@ madal share <link-or-id> --with bob@example.com
 madal share <link-or-id> --remove bob@example.com
 madal share <link-or-id> --access link          # or back to: --access only-people
 
-madal team create design
-madal team add design carol@example.com
+madal team create design                        # teams live in an org you admin (see Orgs)
+madal team add design carol@example.com --expires 24h   # link lasts 7 days by default
+madal team join <invite link>                   # carol, if she had no Madal account yet
+madal team invites design                       # pending invites, their role and expiry
+madal team invite reissue design carol@example.com   # new link; the old one stops working
+madal team invite revoke design carol@example.com    # cancel the invite
 madal team remove design carol@example.com      # rotates the team key
 ```
 
@@ -232,6 +279,71 @@ You can share with anyone's email. If they don't use Madal yet they're invited, 
 an invite link for each person. Send each one their own link: it opens as soon as they sign up
 with that email, even if your machine is off. The link carries a secret that only works for that
 email's account, and the server never sees it.
+
+Adding someone to a team works the same way. `madal team add` prints their own link, and they join
+with it from the browser or with `madal team join`, without waiting for an admin's machine. When
+you remove someone, the team key rotates and every pending link stops working, since the removed
+person may have seen them. `madal team remove` prints a new link for each pending invite, and the
+team's page in the browser shows them with a copy button. Send those again. If one can't be
+re-issued, madal names it; run `madal team invite reissue` for that person.
+
+### Orgs
+
+An org has its own key. Pages shared with `org:<name>` open for every member, and the org owns the
+teams made in it: org admins hold every team key and can invite to, remove from and delete any of
+them. Teams stay hidden from org members until they join one with its own link.
+
+```bash
+madal org create                                # the org for your email's domain: you@acme.com makes Acme, for acme.com
+madal org invite acme dan@example.com           # prints dan's link; he joins in the browser or with madal team join
+madal team create eng --org acme
+madal team add eng erin@example.com --link      # erin isn't in acme: her one link joins both
+madal org admin add acme dan@example.com        # asks you to confirm dan's fingerprint; he gets every team key
+madal org show acme                             # members, teams, invites, and "Acme · acme.com · claimed by email"
+madal org remove acme dan@example.com           # rotates the org key and every team key dan held
+```
+
+Teams come with an org: only an org admin can make one, from the CLI, the MCP `team` tool or
+the org page in the browser. A personal account shares page by page instead. A team made before
+this rule stays readable but takes no new members or pages until an org admin adopts it with
+`madal org adopt <team>`.
+
+Org admins can act as the owner of any page filed in, or shared with, the org's drive or one of
+its teams. They can publish new versions, restore, delete and change who it's shared with, and
+the page's history names them. When an owner leaves, `madal takeover <link>` makes the admin the
+owner, and the move shows in `madal versions`. Members' personal pages are never theirs to touch.
+
+The admin list is a signed chain. Every change is signed by an existing admin, and every client
+pins the chain and refuses a rollback or a fork, so the server can't make anyone an admin. Admins
+can also make or remove admins from the org page in the browser, which shows the new admin's
+fingerprint to check first. While an org has one admin, the org page and `madal org show` suggest
+adding a second, and the last admin can't be removed. The org's
+name is sealed with the org key; the server sees only its domain.
+
+An org is claimed by email domain. A new account, one that hasn't set up its keys yet, picks personal
+or company when it signs up. With
+company, the first person with a verified address at a domain creates its org and is its first admin;
+anyone after them at that domain is told to ask an admin for an invite link (joining is by invite
+link only). Domains compare by their registrable part, so `eng.acme.co.uk` is `acme.co.uk`, and free
+mail and throwaway domains can never have an org. The server keeps one claim per domain, so two
+sign-ups at once can't both win. Accounts that already have keys aren't asked: they set up their company's org from
+the Account page, and an org made before this can claim its admin's domain from its org page (or
+`madal org domain claim <org>`).
+
+An admin can also verify the org's domain with DNS. It's optional and adds a tick next to the
+org's name. Only the domain the org already holds by email can be verified (on the org page, or
+`madal org domain claim <org> <domain>`). It is a TXT record at
+`_madal.<domain>` naming the org and the fingerprint of its first admin link. The server checks it
+through two public resolvers and again every day, and drops it after 7 days missing. Clients look
+the record up themselves, and the badge turns into `acme.com ✓` only when they see it too.
+
+A team invite link stops working when it expires: 7 days after `madal team add` unless you pass
+`--expires` (`24h`, `7d`, `2026-12-01` or `never`). Your signature covers the expiry, so the
+server can't extend it. `madal team invite reissue` gives someone a new link and kills the old one.
+It keeps the expiry unless that has passed, in which case it uses 7 days, or the one you pass with
+`--expires`. `madal team invite revoke` cancels an invite, and its link then says so. The team page
+in the browser does the same from its Pending invites card, which shows each link's expiry and has
+Reissue and Revoke buttons, plus a form to invite someone by link.
 
 The first time you share with someone, madal shows their **key fingerprint**. Compare it with what
 `madal whoami` shows them, over a channel you trust, to be sure the server handed you their real
@@ -250,6 +362,18 @@ sign in again with the same email and start fresh.
 On a new or reset machine, `madal login` and your master password (plus the Secret Key from your
 Emergency Kit, once) bring everything back: `madal list` shows your links and titles again.
 `madal logout` keeps only what the server can't rebuild; `madal logout --forget` removes everything.
+
+### Updates
+
+madal keeps itself up to date. Once a day it checks for a newer release. A binary installed with
+the install script or a download updates in the background: madal installs a release only when its
+checksums carry a valid signature from the madal release key built into the binary, and the next
+run prints `madal updated to vX`. The MCP server through `npx -y @facets-cloud/madal mcp` and the
+agent plugin pick up a new release the next time your agent starts them. Installs managed by npm,
+Homebrew, Nix or snap are left to that package manager.
+
+To turn automatic updates off, set `MADAL_NO_AUTO_UPDATE=1` or run `madal upgrade --auto off`.
+madal then only tells you when a release is out, and `madal upgrade` installs it.
 
 ---
 
