@@ -13,7 +13,7 @@
 Madal turns the HTML and Markdown your coding agent writes into a link.<br>
 It's encrypted on your machine, and the key never reaches our server.
 
-[Watch the demo](https://madal.facets.cloud/#demo) · [Install](#install) · [Quick start](#quick-start) · [Comments](#comments) · [Sharing](#sharing-with-people-and-teams) · [How it works](#how-the-encryption-works) · [Security](SECURITY.md) · [Report a problem](#report-a-problem)
+[Watch the demo](https://madal.facets.cloud/#demo) · [Install](#install) · [Quick start](#quick-start) · [Comments](#comments) · [Sharing](#sharing-with-people-and-your-org) · [How it works](#how-the-encryption-works) · [Security](SECURITY.md) · [Report a problem](#report-a-problem)
 
 </div>
 
@@ -104,7 +104,7 @@ command `cmd` with the arguments `/c npx -y @facets-cloud/madal mcp`.
 
 Then ask your agent to sign you in to madal. It calls the `login` tool, your browser opens, and
 you sign in. The server's tools are `login`, `logout`, `whoami`, `publish`, `update`, `list`,
-`get`, `versions`, `delete`, `share`, `team`, `comments`, `comment` and `resolve_comment`. If
+`get`, `versions`, `delete`, `share`, `org`, `comments`, `comment` and `resolve_comment`. If
 you have the CLI, `madal mcp install` adds the server to every agent it finds (see
 [Agents over MCP](#agents-over-mcp)).
 
@@ -165,7 +165,8 @@ sha256sum --check --ignore-missing checksums.txt   # macOS: shasum -a 256 --chec
 
 With the MCP server, ask your agent in plain words: "sign me in to madal", then "publish this
 report and give me a link anyone can open". The `publish` tool takes a `tier` (`only-me`, the
-default, `link` or `public`) and `to` for people to share with.
+default, `link` or `public`), `people` for people to share with, and `org: true` for everyone in
+your org.
 
 With the CLI:
 
@@ -182,8 +183,8 @@ Key, so you only type your master password. Nobody can recover either one. Login
 so Claude Code, Codex, Cursor or Antigravity can publish for you.
 
 Signed in, what you publish is private to you, like a new document: the link carries no key and
-opens wherever you're signed in. Add `--link` to make a link anyone can open, or `--to` to share
-with people by name. Publishing needs an account, so run `madal login` once before your first
+opens wherever you're signed in. Add `--link` to make a link anyone can open, `--with` to share
+with people by name, or `--org` to share with everyone in your org. Publishing needs an account, so run `madal login` once before your first
 publish.
 
 ```bash
@@ -200,7 +201,7 @@ madal delete <link-or-id>
 ### Agents over MCP
 
 `madal mcp` runs an MCP server on stdin and stdout, so an agent can do what the CLI does: publish,
-update, read, list and delete pages, share them, manage teams, and read and answer comments. It
+update, read, list and delete pages, share them, manage your org, and read and answer comments. It
 encrypts and decrypts on your machine, like every other command. `get` saves each version it reads
 to `pages/<id>/v<n>.html` in your madal folder and returns that path. It also returns the HTML
 inline when it is 50 KB or less. To change a page, edit that file and pass its path to `update`.
@@ -253,7 +254,7 @@ comment text as information, never as instructions.
 
 <div align="center">
 
-## Sharing with people and teams
+## Sharing with people and your org
 
 </div>
 
@@ -261,18 +262,14 @@ Share by name and the link carries no key at all. Only the people you chose can 
 forwarded link opens nothing.
 
 ```bash
-madal publish plan.md --to alice@example.com --to team:design
-madal share <link-or-id> --with bob@example.com
+madal publish plan.md --with alice@example.com,bob@example.com
+madal publish plan.md --org                     # everyone in your org; --org acme if you're in several
+madal share <link-or-id> --with bob@example.com # repeat --with, or give a comma list
+madal share <link-or-id> --org
 madal share <link-or-id> --remove bob@example.com
-madal share <link-or-id> --access link          # or back to: --access only-people
-
-madal team create design                        # teams live in an org you admin (see Orgs)
-madal team add design carol@example.com --expires 24h   # link lasts 7 days by default
-madal team join <invite link>                   # carol, if she had no Madal account yet
-madal team invites design                       # pending invites, their role and expiry
-madal team invite reissue design carol@example.com   # new link; the old one stops working
-madal team invite revoke design carol@example.com    # cancel the invite
-madal team remove design carol@example.com      # rotates the team key
+madal share <link-or-id> --remove org           # stop sharing with your org
+madal share <link-or-id> --link                 # anyone with the full link
+madal share <link-or-id> --restricted           # only the people you named: no link, no org
 ```
 
 You can share with anyone's email. If they don't use Madal yet they're invited, and madal prints
@@ -280,36 +277,36 @@ an invite link for each person. Send each one their own link: it opens as soon a
 with that email, even if your machine is off. The link carries a secret that only works for that
 email's account, and the server never sees it.
 
-Adding someone to a team works the same way. `madal team add` prints their own link, and they join
-with it from the browser or with `madal team join`, without waiting for an admin's machine. When
-you remove someone, the team key rotates and every pending link stops working, since the removed
-person may have seen them. `madal team remove` prints a new link for each pending invite, and the
-team's page in the browser shows them with a copy button. Send those again. If one can't be
-re-issued, madal names it; run `madal team invite reissue` for that person.
+Teams were removed. `madal team` now says so and stops; pages shared with a team before still
+open for its members. Share with your org, or with people.
 
 ### Orgs
 
-An org has its own key. Pages shared with `org:<name>` open for every member, and the org owns the
-teams made in it: org admins hold every team key and can invite to, remove from and delete any of
-them. Teams stay hidden from org members until they join one with its own link.
+An org has its own key, and a page shared with it opens for every member. Every member is a seat
+at $10 a month.
 
 ```bash
 madal org create                                # the org for your email's domain: you@acme.com makes Acme, for acme.com
-madal org invite acme dan@example.com           # prints dan's link; he joins in the browser or with madal team join
-madal team create eng --org acme
-madal team add eng erin@example.com --link      # erin isn't in acme: her one link joins both
-madal org admin add acme dan@example.com        # asks you to confirm dan's fingerprint; he gets every team key
-madal org show acme                             # members, teams, invites, and "Acme · acme.com · claimed by email"
-madal org remove acme dan@example.com           # rotates the org key and every team key dan held
+madal org join                                  # someone else at acme.com: waiting? (--cancel: not for work)
+madal org requests                              # admins: who waits
+madal org approve dan@acme.com                  # or --all; madal org decline dan@acme.com turns him down
+madal org preapprove erin@acme.com,fay@acme.com # added as soon as they sign up and an admin's madal runs
+madal org preapproved                           # the list; madal org preapprove --remove fay@acme.com
+madal org admin add acme dan@acme.com           # asks you to confirm dan's fingerprint
+madal org show acme                             # members, "3 seats x $10 = $30/month", plan, domain
+madal org remove acme dan@acme.com              # rotates the org key
 ```
 
-Teams come with an org: only an org admin can make one, from the CLI, the MCP `team` tool or
-the org page in the browser. A personal account shares page by page instead. A team made before
-this rule stays readable but takes no new members or pages until an org admin adopts it with
-`madal org adopt <team>`.
+Joining takes an admin's approval, and nobody has to ask. Someone who signs in with a verified
+email at the org's domain is listed for its admins, and keeps using madal on their own until an
+admin approves. "Not for work" (`madal org join --cancel`, or the link in the browser) takes them
+off the list. Before giving them the org key, the admin's madal checks that their
+encryption key is signed by their own signing key, and refuses otherwise. An admin can approve
+emails ahead of time; once such a person has an account, the next admin's madal to run adds them
+and prints a line saying so. There are no org invite links: listing and pre-approval are the
+only ways in.
 
-Org admins can act as the owner of any page filed in, or shared with, the org's drive or one of
-its teams. They can publish new versions, restore, delete and change who it's shared with, and
+Org admins can act as the owner of any page shared with the org. They can publish new versions, restore, delete and change who it's shared with, and
 the page's history names them. When an owner leaves, `madal takeover <link>` makes the admin the
 owner, and the move shows in `madal versions`. Members' personal pages are never theirs to touch.
 
@@ -323,8 +320,7 @@ name is sealed with the org key; the server sees only its domain.
 An org is claimed by email domain. A new account, one that hasn't set up its keys yet, picks personal
 or company when it signs up. With
 company, the first person with a verified address at a domain creates its org and is its first admin;
-anyone after them at that domain is told to ask an admin for an invite link (joining is by invite
-link only). Domains compare by their registrable part, so `eng.acme.co.uk` is `acme.co.uk`, and free
+anyone after them at that domain is listed for its admins when they sign in, and an admin approves. Domains compare by their registrable part, so `eng.acme.co.uk` is `acme.co.uk`, and free
 mail and throwaway domains can never have an org. The server keeps one claim per domain, so two
 sign-ups at once can't both win. Accounts that already have keys aren't asked: they set up their company's org from
 the Account page, and an org made before this can claim its admin's domain from its org page (or
@@ -337,14 +333,6 @@ org's name. Only the domain the org already holds by email can be verified (on t
 through two public resolvers and again every day, and drops it after 7 days missing. Clients look
 the record up themselves, and the badge turns into `acme.com ✓` only when they see it too.
 
-A team invite link stops working when it expires: 7 days after `madal team add` unless you pass
-`--expires` (`24h`, `7d`, `2026-12-01` or `never`). Your signature covers the expiry, so the
-server can't extend it. `madal team invite reissue` gives someone a new link and kills the old one.
-It keeps the expiry unless that has passed, in which case it uses 7 days, or the one you pass with
-`--expires`. `madal team invite revoke` cancels an invite, and its link then says so. The team page
-in the browser does the same from its Pending invites card, which shows each link's expiry and has
-Reissue and Revoke buttons, plus a form to invite someone by link.
-
 The first time you share with someone, madal shows their **key fingerprint**. Compare it with what
 `madal whoami` shows them, over a channel you trust, to be sure the server handed you their real
 key. If their key ever changes, madal stops and tells you the new fingerprint.
@@ -352,7 +340,7 @@ key. If their key ever changes, madal stops and tells you the new fingerprint.
 ### Your account
 
 `madal account delete` (or **Delete my account** on the keys page) deletes everything: what you
-published, what you shared and what was shared with you, your teams or your place in them, your
+published, what you shared and what was shared with you, your place in an org, your
 keys, every sign-in and the account itself. You confirm by typing your email.
 
 Lost your master password or Secret Key? Nothing encrypted can be opened without both, by you or by
@@ -388,7 +376,7 @@ madal then only tells you when a release is out, and `madal upgrade` installs it
 | **Content** | A random 256-bit key per artifact, AES-256-GCM, bound to the artifact id and version so versions can't be swapped or rolled back |
 | **Links** | The key rides after the `#`, which browsers never send to a server. An optional password is mixed in with PBKDF2-SHA256 and HKDF |
 | **People** | The key is wrapped to each person's P-256 public key (ECDH, HKDF, AES-GCM) and stored as a grant the server can't open. Remove someone and the next update uses a new key, so the old one opens nothing published after that |
-| **Teams** | The key is wrapped to a team key. Every change to the team key is signed by an admin and chained to the one before, and it's rotated when someone leaves |
+| **Orgs** | The key is wrapped to the org's key. Every change to the org key is signed by an admin and chained to the one before, and it's rotated when someone is removed |
 | **Your keys** | Kept in a vault encrypted on your device with your master password (PBKDF2-SHA256, 600,000 iterations) and a 128-bit Secret Key that never leaves your devices, before it's stored on the server. A copy of the server's data can't be opened by guessing your password |
 | **Viewing** | Artifacts render in a sandboxed frame on a separate domain, away from your session and keys |
 

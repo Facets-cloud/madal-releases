@@ -265,7 +265,8 @@ cli_codes  {_id: sha256(code), uid, challenge, expires_at}
 artifacts  {_id, owner_uid | null, edit_token_hash | null, tier, latest,
             password: {salt, iterations} | null, title (public only),
             description (public only), key_gen, rotate, first,
-            created_at, updated_at, expires_at | null}
+            created_at, updated_at, changed_at, expires_at | null}
+removals   {_id: "<owner uid>/<artifact id>", owner_uid, artifact_id, at, expires_at}
 versions   {_id: "<id>/<n>", artifact_id, n, size, object, key_gen, created_at,
             note (sealed) | null, author_uid, via_agent, pruned}
 reports    {_id, artifact_id, reason, key_included, created_at, ip_hash}
@@ -276,6 +277,43 @@ gs://<bucket>/a/<id>/<n>        link-tier ciphertext or public plaintext
 
 Artifact ids are 16 random bytes in base64url (22 chars). Guessing one is not feasible, but an
 id alone reveals nothing for the link tier anyway.
+
+**Dashboard polling.** The dashboard checks for changes at most once a minute while someone is
+looking (web/app/refresh.js). Its own-pages list is the one that grows with a person's history, so
+after the first check it asks only for what changed: `GET /api/artifacts?since=<cursor>`. The
+answer is `{artifacts, removed, cursor, full}`. Every store write to an artifact record sets
+`changed_at` by the store's clock, and `updated_at` keeps its meaning as the page's age. A page that
+leaves its owner's list, because it was deleted or an org admin took it over, leaves a record in
+`removals`. The cursor is the store's clock when the call began, never the client's. Each call looks
+back two minutes before it, so a write stamped by an instance whose clock runs behind still shows;
+the client merges by id, so seeing a page twice costs nothing. An empty cursor, more than 500
+changes, or a cursor older than the 30 days removals are kept all get the whole list with
+`full: true`. A call without `since` is the plain list, byte for byte as before, for the CLI, MCP
+and dashboards from before this. The shared, teams and invites lists are still read whole on every
+check.
+
+**Indexes.** Firestore's MongoDB API answers a query with no matching index by scanning the
+collection, and bills reads for what it scans. Without indexes, every poll reads every artifact in
+the database, not only the caller's. The app server creates the ones the store's queries need when
+it starts (`EnsureIndexes` in internal/store/indexes.go):
+
+- `artifacts {owner_uid: 1, updated_at: -1}` for the plain list
+- `artifacts {owner_uid: 1, changed_at: 1}` for `?since=`
+- `removals {owner_uid: 1, at: 1}` for `?since=`
+
+It lists each collection's indexes first and creates only the missing ones, matching on keys, so
+a start that finds them all creates nothing. Firestore takes one index per `createIndexes`, and
+refuses a `maxTimeMS` over 60 seconds, which the Go driver sets from the context deadline. So
+each index is its own call, all at once, under a 50-second deadline, in the background. Firestore
+builds an index as a long-running operation, a few minutes at least, and queries keep working
+(by scanning) until it's ready. Creating indexes needs `roles/datastore.indexAdmin` on the app's
+service account, scoped to this database with the same IAM condition as its `datastore.user`
+grant. Without it the server logs a warning and carries on. Check an index is ready with
+`skoop debug gcloud firestore indexes composite list --database=<database id>`.
+
+A TTL policy on `removals.expires_at` can drop old removal records. Nothing depends on it.
+`TestPollReads` in internal/store measures what each query examines on MongoDB, with and without
+the indexes.
 
 **Store operators.** Production runs on Firestore's MongoDB API, which doesn't implement every
 MongoDB operator. Store code uses only the operators below, which production has run. Using any
@@ -405,6 +443,14 @@ artifact or another recipient.
 
 ### Teams
 
+Removed 2026-11-20. People share with their org or with people by email. The server answers 410
+"teams were removed; share with your org or with people" to making a team (`POST /api/teams` for
+anything but an org) and to adopting one, and the CLI, MCP, web app and skill no longer offer them.
+Teams already stored keep serving their pages and still take removals, rotations and deletes; no
+data was migrated, since production had none in use. Orgs are team records underneath, so the
+machinery below still runs every org.
+
+
 - A team has its own `E` pair. Its private key is wrapped (above) to each member's `E`, so adding a
   member is one wrap and gives them every artifact already shared with the team.
 - Every change to the team key is a signed **transition**. The admin who makes it signs, with
@@ -522,6 +568,67 @@ artifact or another recipient.
   over DNS-over-HTTPS) and compare it with the root they pinned; the tick shows only when both agree.
   For local runs, `DEV_DNS` (allowed only with `STORE=memory`) answers from fixed records or a file.
 
+### Joining an org
+
+Agreed 2026-11-20. Joining takes an admin's approval, replacing invite links for new members.
+Org invite links are gone: `PUT /api/teams/{org}/invites` (new or re-issued) answers 410 with
+"org invite links were removed: ...", which old clients print. Links already sent can still be
+claimed until they expire or a rotation ends them, and a rotation no longer re-issues them. The
+CLI has no `org invite`, `invites`, `reissue` or `revoke`, and the MCP `org` tool has no such
+actions.
+Nobody asks: someone signed in with a verified email at the org's claimed domain (or a subdomain of
+it), with keys set up, is listed for the org's admins as waiting. The server lists them when they
+set up keys, when their E key gets signed, and when the dashboard asks `GET /api/me/company`. They
+need keys whose E key carries a valid signature by their S key, since that is what an admin's
+client checks before wrapping. Until an admin adds them, they use madal on their own and see
+"Waiting for an admin at <Org> to add you". "Not for work" (`DELETE /api/orgs/{id}/requests/me`)
+takes them off the list and keeps them off when they sign in again; `POST /api/orgs/{id}/requests`
+puts them back. `GET /api/me/company` returns `join_org_id`, `requested`, `withdrawn`, `declined`
+and `preapproved` so the page knows what to show.
+
+Admins list requests with `GET /api/orgs/{id}/requests`: name, email, when, and the requester's
+public keys. Approving is the usual member add (`POST /api/teams/{id}/members`): the admin's client
+checks the requester's signed E key, pins it, and wraps the org key to it. The server refuses an
+org member add whose E key isn't signed, and the add clears the request. Declining
+(`POST /api/orgs/{id}/requests/{uid}/decline`) sets the request aside: the person isn't listed
+again when they sign in, and can still ask again.
+
+Admins can approve emails ahead of time (`PUT /api/orgs/{id}/preapproved {emails}`, each at the
+org's domain, 100 per call and 1000 per org). Once such a person has an account with signed keys,
+the request list carries them as `preapproved: true`, whether or not they asked, and the next admin
+client to list requests adds them without asking. So a pre-approved person joins as soon as any
+admin's browser or CLI runs. `GET /api/teams` gives each org's admins a `requests` count for the
+nav badge. Every one of these routes answers 403 to anyone but an org admin, members included.
+
+Requests live in `org_requests {_id: "<org>/<uid>", org_id, uid, email, requested_at, status}`
+(status empty while waiting, `withdrawn` or `declined`) and
+pre-approvals in `org_preapprovals {_id: "<org>/<email>", org_id, email, by, at}`.
+
+In the CLI that's `madal org join` (`--cancel`), `madal org requests`, `madal org approve
+<email>... | --all`, `madal org decline`, `madal org preapprove` (`--remove`) and `madal org
+preapproved`; the MCP `org` tool has the same actions. Approving checks the requester's E key
+with `checkKnown(strict)`, the check a new admin gets: the signature over E must verify, and the
+key is pinned on first sight. Nothing is wrapped otherwise. The pre-approved adds run in the
+housekeeping every signed-in command does (`CompleteInvites`, which also runs before each MCP tool
+call), for orgs the caller admins whose `requests` count isn't zero, one line per person added.
+
+Teams are gone from the CLI and MCP (agreed 2026-11-20). `madal team` answers "teams were removed;
+share with your org or with people", the MCP `team` tool is gone, and `team:` recipients and
+`team:` folders are refused; My drive and the org drive stay. Sharing is with people (`--with
+a@x.com,b@y.com`, MCP `people`) or with the org (`--org`, `--remove org`, MCP `org: true`).
+`share --link` opens a page to anyone with its link, and `share --restricted` takes it back to the
+people named: the private tier, and no org grant. Orgs are still team records
+underneath, so the key, rotation and invite code stays.
+
+**Shared with.** The page lists show who each page reaches: the owner's list (`GET /api/artifacts`,
+the `?since=` delta too) and the org drive's (`GET /api/teams/{org}/pages`, for pages the caller owns
+or manages as an org admin) carry `shared_with {orgs: [ids], people: [emails]}`, the owner left out,
+from one grant query (`ListGrantsFor`, `$in`). Other readers never get it. Shared with you carries
+`via_org` when a page reached the caller through their org. The dashboard shows it as the Shared
+with column: the org as a badge, one name or "N people" with the names in a tooltip, or "Only
+you". A share doesn't touch the page's record, so the dashboard asks for its whole list after the
+share dialog closes.
+
 ### Org plans
 
 Every org has a plan, kept in `org_billing` (`internal/store/plans.go`). There's no payment
@@ -556,7 +663,7 @@ sees read-only and locked, since both change what they can do.
 Site admin routes, which 404 for anyone else like the other admin routes:
 
 - `GET /api/admin/orgs`: every org by id and claimed domain (the name stays sealed), seat
-  count (current members), plan, trial end, last change and who made it, and the last 20 log
+  count (approved members, admins included), pending count (people waiting for an admin), plan, trial end, last change and who made it, and the last 20 log
   entries.
 - `POST /api/admin/orgs/{id}/plan` with `{"action", "days", "note"}`. Actions are `activate`,
   `comp`, `extend` (by `days`, 1 to 365, from the trial's end or from today if it has passed),
@@ -929,14 +1036,16 @@ two kept versions, Google Docs style. Full design: `docs/design/page-history.md`
   browser session), the rule comments use. The author's name shows where "Shared by" would.
 - **History outlives pruning.** `GET /api/artifacts/{id}/versions` lists every record, pruned ones
   marked `kept: false`, to anyone who can read the page. Public pages have no history.
-- **Diffs are computed on view, never stored.** The client extracts each version's visible words
-  (text under `<body>` outside script, style, noscript and template; a block edge or `<br>` splits
-  words) and runs Myers' diff, capped at 2000 edits. Each change carries 4 words of context from the
-  newer version. The viewer parses versions with DOMParser, which runs nothing, and sends only the
-  changes into the sandboxed frame. There, added words get a CSS highlight, removed words go back in
-  as struck-through `<del>`, and changed images and canvases get an outline. `internal/pagediff` and
-  `web/app/diff.js` share vectors, and Chrome's extraction matches Go's on them. Fetching an older
-  version to compare counts as an open, as viewing it does.
+- **Diffs are computed on view, never stored.** The client diffs the two versions' source line by
+  line (a Markdown page's source is the HTML madal rendered it to) with Myers' diff, capped at 2000
+  edits, and shows it the way git does: old and new line numbers, 3 lines of context, unchanged
+  stretches folded, and the changed words within a paired changed line marked. If either version
+  has a line over 1000 characters, both are broken before each opening block tag first, so a page
+  written on one line still diffs by line; the line numbers are then those of the broken source.
+  The viewer shows the diff as text in the shell, never in the page's frame. It draws at most 1000
+  rows of a stretch at a time, with a button for the rest. `internal/pagediff` and
+  `web/app/diff.js` share vectors. `madal diff` and the MCP `diff` tool give the same diff as
+  `diff -u` text. Fetching an older version to compare counts as an open, as viewing it does.
 - **Since you last looked.** The browser keeps the last version it showed per page in
   `localStorage`, and offers the comparison when the page has moved on. It never reaches the server.
 - **Restore.** Owner only: the client re-encrypts an old version under the current key (and

@@ -18,7 +18,7 @@ Include what you found, how to reproduce it, and what an attacker gains. A proof
 - Anything that lets the server, or anyone between you and it, read artifact content or keys.
 - Ways for an artifact's own HTML to escape its sandbox, reach the viewer page, or read a key.
 - Bypassing sharing: opening an artifact that wasn't shared with you, keeping access after being
-  removed from a team, or acting as another account.
+  removed from an org, or acting as another account.
 - Weaknesses in the formats described on the [security page](https://madal.facets.cloud/security).
 
 ## Known limits
