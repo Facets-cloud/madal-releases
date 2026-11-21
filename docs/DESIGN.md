@@ -25,6 +25,16 @@ which browsers never send to a server. Anyone with the full link can read it. An
 fragment gets ciphertext. An optional password adds a second factor: the link alone is not
 enough. When the publisher is signed in, the owner also gets a grant, so a link without its
 fragment still opens for them, and their other machines can open and update it.
+Its owner (or an org admin who manages it) can reset the link: the fragment then reads
+`<key>.<token>`, where the token is random and checked by the server on the blob, comment and
+history routes; the page record still answers by id, without the sealed title. Clients send it in a `Madal-Link-Token` header, never in a URL, so it stays out of access
+logs; with signed downloads the blob route then answers the storage link as JSON instead of
+redirecting, so the header never reaches storage. A reset cuts off every copy of the old link at
+once without changing the key. Links from before a page's first reset carry no token and keep
+working until then. When a page changes owner (an admin takes it over, or it passes to the org), the
+server cuts its link the same way, with the hash of a token nobody holds, since the previous owner
+keeps the key and the link. It can't seal a token with the page key, so it tells the page's
+managers `link_cut`, and the client that makes the page a link page again resets the link.
 
 **Public tier.** Plaintext, for signed-in accounts only. The server stores the HTML and serves
 Open Graph tags so links unfurl in Slack and on social sites, with a 1200x630 card image drawn
@@ -265,7 +275,7 @@ cli_codes  {_id: sha256(code), uid, challenge, expires_at}
 artifacts  {_id, owner_uid | null, edit_token_hash | null, tier, latest,
             password: {salt, iterations} | null, title (public only),
             description (public only), key_gen, rotate, first,
-            created_at, updated_at, changed_at, expires_at | null}
+            created_at, updated_at, changed_at, last_comment_at, expires_at | null}
 removals   {_id: "<owner uid>/<artifact id>", owner_uid, artifact_id, at, expires_at}
 versions   {_id: "<id>/<n>", artifact_id, n, size, object, key_gen, created_at,
             note (sealed) | null, author_uid, via_agent, pruned}
@@ -300,6 +310,7 @@ it starts (`EnsureIndexes` in internal/store/indexes.go):
 - `artifacts {owner_uid: 1, updated_at: -1}` for the plain list
 - `artifacts {owner_uid: 1, changed_at: 1}` for `?since=`
 - `removals {owner_uid: 1, at: 1}` for `?since=`
+- `comments {artifact_id: 1, created_at: 1}` for a page's comments, whole or `?since=`
 
 It lists each collection's indexes first and creates only the missing ones, matching on keys, so
 a start that finds them all creates nothing. Firestore takes one index per `createIndexes`, and
@@ -533,6 +544,19 @@ machinery below still runs every org.
   grant, their pending invites to the page and their own folders for it go, so they keep only
   what their teams give them, and a private page gets a new key with its next version. The new
   owner's client gives itself a grant to the keyring it opened through the team.
+- **Pages pass to the org.** A page shared with an org, directly or through one of its teams,
+  belongs to the person who shared it while they're in the org. When they leave it, an admin
+  removes them, or they delete their account, the server moves it to the org itself:
+  `owner_uid = "org:<org id>"`, which no person's uid matches, so the page leaves their My drive,
+  lands in no admin's, and stays in the org drive for every org admin to manage. The move is in the
+  page's history with its reason (`left`, `removed`, `deleted`). As with a takeover, their grant,
+  invites and folders go and the key rotates with the next version; a link page also becomes
+  private, so the same link opens only for the org's members and anyone shared with by name. A
+  page also shared with another org they're still in stays theirs. The org's pages can't be taken
+  over, take no email invites (an invite's secret is wrapped to one owner's key), and keep the
+  org's own grant. `GET /api/orgs/{id}/handover?uid=` counts what would pass, for the leave and
+  remove confirmations, and site admins move pages of people who left before this with
+  `POST /api/admin/orgs/{id}/sweep-owners` (`?dry_run=1` only counts).
 - **Adopting a team.** A team made outside any org (say, before orgs existed) joins one when
   someone who is an admin of both the org and the team adopts it (`madal org adopt <team>`, the
   `org` tool's `adopt`, or the org page). Everyone in the team must already be in the org. The
@@ -855,8 +879,9 @@ with a copy button. The server can't open the copy.
 
 ### Deleting an account
 
-`DELETE /api/me`, with the account's email in the body as confirmation, purges every artifact the
-account owns (blobs, versions, grants), deletes its received grants, invites by or for it, team
+`DELETE /api/me`, with the account's email in the body as confirmation, first passes the account's
+pages shared with its orgs to those orgs (see Pages pass to the org), then purges every artifact the
+account still owns (blobs, versions, grants), deletes its received grants, invites by or for it, team
 memberships, sharing keys, every token (CLI and browser sessions alike), the user record and the
 sign-in record. A team it leaves is deleted if empty; otherwise its longest-standing member becomes
 admin if none is left. The server can't rotate team keys, so a team whose key was signed by the
@@ -1059,7 +1084,7 @@ key, so whoever can read the page can read its comments and the server can't:
 
 ```
 CK     = HKDF-SHA256(K[key_gen], info = "madal/v1/comment", 32 bytes)
-body   = "MDC1" || nonce12 || AES-256-GCM(CK, nonce, JSON {text, anchor}, aad)
+body   = "MDC1" || nonce12 || AES-256-GCM(CK, nonce, JSON {text, anchor, mentions?}, aad)
 aad    = "madal/v1/comment/" + artifact id + "/" + version + "/" + comment id + "/" + parent id
 proof  = base64url(HKDF-SHA256(K, info = "madal/v1/comment-auth/" + artifact id))
 anchor = {exact, prefix, suffix}                      a passage (W3C text quote)
@@ -1075,21 +1100,112 @@ anchor = {exact, prefix, suffix}                      a passage (W3C text quote)
   browser the first time the owner opens the page, so knowing a page id isn't enough. Public and
   password-protected pages take no comments.
 - The server stores the author, the version, the key generation, the time and whether a thread is
-  resolved, and who resolved it. Only a thread's author resolves or reopens it; once that account is
-  deleted, the page's owner can. Deleting an account keeps its comments without an author.
+  resolved, and who resolved it. Anyone who can comment on the page resolves or reopens any thread
+  on it, and the thread shows who resolved it. Deleting an account keeps its comments without an
+  author.
 - The CLI, the Go SDK and `madal mcp` read and post comments with the same crypto
   (`internal/comments`, kept in step with `comments.js` by shared vectors in its `testdata/`). On a
   link page the CLI sends the proof, and when its owner finds no proof hash stored yet, it stores
   one the way the owner's browser does. `madal comment --on "passage"` builds the anchor from the
   latest version's text the way the frame indexes it: text under `<body>` minus script, style and
   noscript, with 32 characters either side.
+- Posting a comment sets the page's `last_comment_at` to the comment's own time (it only moves
+  forward) and its `changed_at`, so the owner's next `?since=` poll returns the page. `updated_at`
+  stays the page's age. The own, shared and team or org drive lists send `last_comment_at`; the
+  single-page read, which anyone holding a link can make, doesn't. The shared list also sends
+  `shared_at`, the time of the grant the page came through. `GET .../comments?since=<cursor>`
+  answers only comments from the cursor on, with the same checks as the whole list and the same
+  two-minute look-back as the dashboard poll; every answer carries the next cursor, and the client
+  merges by id. A `since` answer doesn't show deletions or resolves. This lets a dashboard find the
+  few pages with new comments and decrypt only those. None of it is new to the server: it already
+  stores each comment's page, author and time, and each grant's time. `last_comment_at` is the
+  newest of those times, kept on the page.
 - A comment posted with a madal token in the `Authorization` header (the CLI, SDK or MCP server)
   is stored with `via_agent`; the browser sends its session cookie instead. The viewer shows a
   "via agent" badge next to the author, so readers know a program posted it for that person.
+- @mentions (2026-11-21) work on org pages only: pages shared with an org, or an org's team, that
+  the commenter is in. `GET /api/artifacts/{id}/mentionable` lists that org's other members (uid,
+  name, email), which members already see in the org; every other page gets an empty list, and "@"
+  stays plain text. Typing "@" and letters in a comment box offers matches; Tab or Enter fills
+  "@Name". On posting, each "@Name" that names a member is sealed into the body as
+  `mentions: [{uid, name}]`, so the server never learns who was mentioned, and readers see the
+  names highlighted. Those are whatever the commenter sealed, so a reader highlights a mention
+  only when its uid is someone the page lists under that same current name, and the banner and
+  the Inbox count a mention of you only under your current name; anything else is plain text. The key is left out when there are none, so older clients and the shared
+  vectors are unchanged. There's no email or other channel. The viewer tells people itself: when
+  a signed-in reader opens the page and comments decrypt, a banner says "You were mentioned in N
+  threads" for mentions of their uid that are still unread in their Inbox (see Inbox below). Show
+  opens the panel at the first one, and their own name stands out in it. Once the banner shows,
+  those mentions count as read in the account's sealed inbox state, so the banner and the Inbox
+  agree on every device. Without that state (keys locked here, or the network), every mention not
+  shown on this visit shows.
+- Pages shared with people by name (2026-11-21) take @mentions too: the list adds the page's owner
+  and the people it's shared with by name, besides the caller. People invited by email who have no
+  account yet aren't listed.
+- Emails on comments (2026-11-21): each comment carries its author's email, and the mention list
+  has one for everyone in it, so two people with the same name can be told apart. Hovering an
+  author or an @mention shows it, and the "@" list shows it under the name. A caller gets an email
+  in full only where they already see it: their own; everyone's when they manage the page (its
+  owner, or an org admin over it, as in the share list); other members of the page's orgs they're
+  in; and the owner's verified email on a private page ("Shared by"). Everyone else's comes masked
+  by the server, first character and domain (`c•••@example.com`), so a full address never reaches
+  a reader who isn't allowed it. Where two people share a name, a posted "@Name" mentions the one
+  picked from the list, not whoever comes first.
 - Comment text never enters the sandboxed frame, where the page's own scripts run. The frame reports
   positions (selection, clicks, element boxes) and paints highlights with the CSS Custom Highlight
   API; the viewer draws tooltips, cards, regions and markers above it and treats everything from the
   frame as untrusted.
+
+## Inbox
+
+Agreed 2026-11-21. The dashboard's Inbox lists @mentions of you, replies in threads you started or
+replied in (from your first comment in the thread on), and pages shared with you by name. Pages
+that reach you through a team or your org aren't items: filing a page into the org drive shares it
+with the whole org, which would flood everyone. Comments on pages you own are off by default; a
+checkbox in the Inbox turns them on, per browser. It shows the last 30 days, at most 100 items.
+
+The server learns nothing new. It never sees an inbox:
+
+- The browser finds the items. The page lists carry `last_comment_at` and the shared list carries
+  `shared_at` (see Comments). On each dashboard check (the same 60s, visible, not idle rules), the
+  browser picks the pages whose `last_comment_at` moved since it last looked, fetches their
+  comments (the whole list the first time on a visit, so an old thread you started still counts,
+  then `?since=` the cursor), opens them with the page key it already opens for titles, and keeps
+  who wrote each one, when, in which thread and whom it mentions. It drops the text. A quiet day
+  costs nothing extra. It finds items only while a dashboard is open, and catches up on the next
+  visit.
+- Read and dismissed state is one sealed record per account, `GET/PUT /api/me/inbox-state`, built
+  like the trust record: `keys.InboxKey` from the account's E key, padded, bound to the uid and a
+  `seq`, written compare-and-swap. Inside: a `floor` time (items at or before it are read), `read`
+  and `unread` marks newer or older than it, and `dismissed`, each mark with its time. Item ids are
+  the comment id, or `share:<page id>`. Two devices merge mark by mark (`web/app/inboxstate.js`):
+  the later floor, the union of dismissals, and the newer mark per id. The server sees only the
+  record's size bucket and when it's written, which tells it roughly when you read your inbox.
+  The server can't forge the record but could replay an older one, bringing read items back as
+  unread, so each browser remembers the highest `seq` it has seen per account (localStorage
+  `madal.inbox.seq.<uid>`) and refuses a lower one.
+- The tab's dot and the Inbox count are worked out in the browser. Until it has decrypted, the dot
+  comes from the count this browser saved last time (localStorage, never synced). No count comes
+  from the server.
+
+The pure part is `web/app/inbox.js` (pick pages, find items, group rows, keys, swipes), tested in
+`inbox.test.mjs`. The view lives in `dashboard.js`:
+
+- "Inbox" sits at the top of the Madals sidebar, above My drive, at `#pages/inbox`. One list, one
+  row per page: unread rows first in bold, then read ones, newest activity first in each. A row
+  shows the title, who ("Alice and 2 others"), a reason chip (Mention, then Reply, Shared, Comment),
+  how many items, and how long ago. Filter chips: All, Mentions, Replies, Shared.
+- A row opens its page at the newest unread comment and marks the row read first. The link carries
+  the comment in the fragment, `#~c=<comment id>` (or `#<key>.<token>~c=<id>` on a link page), so
+  the server never sees which comment you went to. The viewer takes it off the address at once and
+  calls `jumpTo` once the comments load.
+- Each row toggles read or unread and dismisses. On a desktop, checkboxes select rows for a bulk
+  mark or dismiss. "Mark all read" moves the floor and offers Undo for 5 seconds, which marks the
+  same items unread again. Keys: `j`/`k` move, Enter opens, `u` toggles read, `e` dismisses, `x`
+  selects; ignored while typing.
+- Phones: the Madals tab in the bottom bar gets the dot, a line "N unread in Inbox" sits above the
+  pages list (where the sidebar is hidden), and a row swipes right to mark read, left to dismiss.
+- "Shared with you" and "No folder" have their own icons, so neither looks like the Inbox.
 
 ## Out of scope for v0
 
