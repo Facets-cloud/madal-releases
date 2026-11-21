@@ -1099,6 +1099,22 @@ anchor = {exact, prefix, suffix}                      a passage (W3C text quote)
   page's readers also send the proof, and the server keeps only its SHA-256, set by the owner's
   browser the first time the owner opens the page, so knowing a page id isn't enough. Public and
   password-protected pages take no comments.
+- Roles (2026-11-22). Each grant, by name or to an org or team, has a role: `comment` (the
+  default, and what a grant from before roles, with none, means) or `view`. A `view` grantee reads
+  the page and its comments, and deletes their own, but the server refuses (403, "you can view
+  this page but not comment on it") their posts, replies, resolves and reopens. With several
+  grants (by name and through an org) the strongest role wins; the owner and managing org admins
+  always comment. `GET .../comments` answers `can_comment` so the viewer hides its comment box
+  for view-only readers; `GET .../mentionable` leaves view-only readers out, and gives them an
+  empty list. `PUT /api/artifacts/{id}/grants` takes `role` (empty on a re-wrap keeps the stored
+  one), `PUT .../grants/{kind}/{rid}/role {role}` changes it (owner or managing admin), and an
+  email invite keeps `role` until it becomes a grant. The CLI's `madal share ID --with x --role
+  view|comment` sets it, sharing again changes it, and the MCP `share` tool takes `role`. On a
+  link page, "Anyone with the link" maps onto the comment proof: Can view is `DELETE
+  .../comment-auth`, which stores a marker no proof matches and that the automatic turn-on (the
+  owner opening or commenting) won't replace; Can comment is `PUT .../comment-auth {hash, on:
+  true}`. The role is metadata next to the grant, which the server already holds; no content
+  reaches it.
 - The server stores the author, the version, the key generation, the time and whether a thread is
   resolved, and who resolved it. Anyone who can comment on the page resolves or reopens any thread
   on it, and the thread shows who resolved it. Deleting an account keeps its comments without an
