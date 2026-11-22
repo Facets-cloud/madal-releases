@@ -5,6 +5,8 @@
 .mcp.json
 GEMINI.md
 gemini-extension.json
+hooks/hooks.json
+hooks/meetings-hook.sh
 mcp.json
 mcp_config.json
 plugin.json
