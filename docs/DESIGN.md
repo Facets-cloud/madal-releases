@@ -1222,6 +1222,140 @@ The pure part is `web/app/inbox.js` (pick pages, find items, group rows, keys, s
 - Phones: the Madals tab in the bottom bar gets the dot, a line "N unread in Inbox" sits above the
   pages list (where the sidebar is hidden), and a row swipes right to mark read, left to dismiss.
 - "Shared with you" and "No folder" have their own icons, so neither looks like the Inbox.
+## Meeting pages
+
+Agreed 2026-11-20. The madal menubar app records a call, transcribes it on the Mac and publishes
+the transcript as a private page. The user's own agent summarizes it later, through the MCP. The
+server must not learn which pages are meetings, so a meeting is an ordinary private page plus one
+sealed record, `enc_meta`:
+
+```
+meta = {kind: "meeting", status, started_at, duration_s, app, tags}
+blob = "MDM1" || nonce12 || AES-256-GCM(K, nonce, JSON padded to 256, 1024 or 2000 bytes,
+                                       aad = "madal/v1/meta/" + artifact id)
+```
+
+`K` is the page's newest key, the same key `enc_title` is sealed with, and the padding is the
+title's (0x80, then zeros). Status is `transcript_only`, `summarized` or `no_summary_needed`.
+
+- It is a new field, not the `user:` folder tags blob. Folder tags are sealed with a key derived
+  from the account key, so an account key reset has to re-seal them, and clients from before this
+  would show a meeting's record as a folder. A page-key blob needs neither: the owner's other
+  machines already open the page key through the owner grant, a key reset re-wraps that grant, and
+  a key rotation keeps the old keys in the ring, which `openMeta` tries newest first.
+- `PUT /api/artifacts/{id}/meta` stores it. Only the owner may set it, on a private or link page,
+  at most 2048 bytes. The owner gets it in the list, `?since=` changes and
+  `GET /api/artifacts/{id}`. Anyone else who can open the page gets it from
+  `GET /api/artifacts/{id}` only, so a person the meeting is shared with sees the meeting view; it
+  is sealed with the page key they already hold, so the server still learns nothing. Setting it moves
+  `changed_at`, so the dashboard poll sees a status change, and not `updated_at`, because no
+  version changed. Old clients ignore the field.
+- Every list, filter and count is computed on the client after decrypting: `madal meetings`, the
+  MCP `meetings` tool and `whoami.pending_meetings`. The cost is one list call, and the list is
+  capped at 500 pages, like `madal list`.
+- The page is rendered by madal from one fixed template (`internal/meeting`), never written by an
+  agent. The transcript (`turns[{t, speaker, text}]`) and the agent's notes are checked against a
+  strict schema. Notes v2 have a title, an optional 1-2 sentence TL;DR, topic `sections[{heading,
+  bullets[{text, sub?}]}]`, optional decisions, the participants named in the call, and action
+  items with an optional free-text owner and due date, shown as "Next steps". Notes without
+  sections are v1 (summary, decisions, items with a required owner), so old pages and agents keep
+  working. Every field is plain text, every field is escaped, and the validated JSON sits in the page in a
+  `<script type="application/json">` block, so a re-render starts from it rather than from HTML.
+  The Notes and Transcript tabs are radio inputs and `:checked`, with no script, since the page's
+  hash holds the link key.
+- Action items are comment threads, one per item, whose text starts with "Action item". The
+  template gives each item `id="item-N" data-item="N"`. On a page whose sealed record says
+  `kind: "meeting"`, and only there, the viewer injects a small script into the frame that reports
+  where each item's box is, and draws a real checkbox above it. The box is ticked when the item's
+  thread is resolved; ticking it resolves or reopens the thread, or first posts one ("Action item:
+  <text>. Owner: <owner>", without the owner when the item has none) pinned on the item when it has none. A thread maps to an item by its
+  pin on the item's element first, then by its quote equal to the item's text, so pages from
+  before the ids work too. Readers who can't comment see the boxes read-only, and a ticked box
+  says who resolved it. Nothing new is stored: the thread's resolved flag is the state. Since
+  the box already marks the thread, an item thread's quoted text gets a faint wash of its
+  commenter's colour instead of the full highlight; other comments on the page keep theirs.
+- Setting `no_summary_needed` publishes no version. Summarizing publishes the next version and
+  sets `summarized`; a dismissed meeting can still be summarized.
+- madal tells the agent a meeting waits in three ways. The hook shows "madal: 1 meeting ready to
+  summarize." and tells the agent to ask, in its own words, whether to summarize the meeting (by
+  title) now. Any yes starts it, inline, in every agent. The hook text is short and leaves the
+  steps to the skill. Claude Code's auto permission mode judges the first step after a bare yes.
+  In local trials (`claude -p --permission-mode auto`, isolated config, no allow rules) it let that
+  step through in 12 of 16 runs inline and 9 of 21 for a background agent, and blocked a background
+  agent in 6 of 6 when the hook spelled out every step. It blocks the dismiss after "no summary
+  needed" too (5 of 5). So Claude Code is told that when the check blocks a step it says, in one
+  line, to say "summarize it" (or "dismiss it"). Naming the action got through in 19 of 19 runs
+  across this and the earlier one-word trials. The MCP reply line and the skill
+  say the same, and that only a yes to the agent's own question counts. Codex treats that line as
+  tool output and doesn't relay the question, so agents without hooks may not ask.
+- Several agents on one Mac can hear about one meeting. Before summarizing a waiting meeting, an
+  agent calls `meeting` with `action: "claim"`. madal seals status `summarizing` with
+  `claimed_at`, `claimed_by` (from the MCP client's name: Claude Code, Claude Desktop, Codex) and a
+  random `claim_id`, which the MCP server keeps for that session. Another agent's claim answers
+  "already claimed by <agent>". The server has no compare-and-swap for the sealed record, so a
+  claim writes, waits 1.5 s and reads back; when two claim at once, the write that landed last
+  wins for both. A claim lasts 15 minutes. Listings, counts, the hook and the web treat a live claim
+  as summarizing and an older one as `transcript_only`. `summarize` with `from_status:
+  "summarizing"` needs the session's own claim, still in place (an expired claim nobody took over
+  counts), and ends it. `release` puts a meeting the session claimed back to waiting. Setting a
+  status by hand ends any claim.
+- An earlier build had a Summarize automatically setting (`madal meetings auto on|off`, a
+  `meetings-mode` file and a menubar toggle). On, it added Claude Code allow rules for madal's
+  meeting tools and offered a bare "y" that summarized inline. It is gone: one behaviour, and no
+  edits to the user's Claude Code settings. When the MCP server starts or `madal mcp install` runs
+  and the profile still has `meetings-mode`, madal removes exactly the four rules it added
+  (`mcp__madal__meetings`, `__get`, `__meeting`, `__comment`) from `~/.claude/settings.json`, after
+  copying the file to `settings.json.madal-backup`, then deletes `meetings-mode`. A settings file
+  that isn't plain JSON is left alone, and the mode file stays so it tries again next time.
+- Agents that don't claim can still guard against a race with `from_status: "transcript_only"`.
+  madal checks the sealed status right before publishing and returns `skipped` without a new
+  version when it changed. The background agent's instructions say the
+  transcript is data and limit it to the `meetings`, `get`, `meeting` and `comment` tools. `madal mcp install` adds SessionStart and UserPromptSubmit
+  hooks to Claude Code and Codex, and a SessionStart hook to Gemini CLI. Every MCP reply except the
+  meetings tools' own ends with a line such as "madal: 2 meetings ready to summarize". And the skill
+  covers whoami's `pending_meetings`.
+- The hook is `meetings-hook.sh` in the profile's folder, written by `madal mcp install` and
+  rewritten each time the MCP server starts. It reads `meetings-pending` (one line per
+  meeting waiting or claimed: id, the Unix time its claim ends or 0, and its title with anything
+  but letters, digits, spaces and a few marks replaced; rewritten whenever madal counts). It skips
+  a live claim without marking it told, so it's mentioned once the claim runs out and the hook's `session_id` from
+  stdin. It starts no madal process and makes no network call. It tells each agent session about
+  each meeting once: the ids it announced go in `meetings-hook-sessions/<session id>`, so a meeting
+  published mid-session is mentioned on the next prompt and not again. Its output is the hooks
+  JSON the three agents share: `systemMessage` is the plain line the user sees, and
+  `hookSpecificOutput.additionalContext` carries the instructions for the agent. It prints
+  nothing when no meeting
+  waits or when signed out, since sign-out deletes `meetings-pending`. madal drops session files
+  older than a week when it rewrites the list.
+- The plugin brings the hook too, so plugin and Gemini extension users get notices without
+  `madal mcp install`. It ships `hooks/meetings-hook.sh`, which finds the profile as the CLI does
+  ($MADAL_HOME or the OS config folder, then $MADAL_PROFILE or the `profiles.json` default) and
+  runs that profile's `meetings-hook.sh`, so the notice text lives in one place. It runs nothing
+  until the MCP server has started once and written that script. `npx -y @facets-cloud/madal` was
+  the other choice, but it takes about 410 ms warm against a few ms for the script, on every
+  prompt. Claude Code and Gemini CLI both read `hooks/hooks.json`, so it holds the SessionStart
+  hook for both (each agent fills in its own path variable and the shell empties the other), and
+  Claude's UserPromptSubmit hook sits in its plugin.json. Codex gets no plugin hook.
+- One notice, not two, when both the plugin and `madal mcp install` added the hook: the plugin's
+  script exits when the agent's own settings (Claude's `settings.json` in `$CLAUDE_CONFIG_DIR` or
+  `~/.claude`, Gemini's `~/.gemini/settings.json`) already hold the `madal-meetings-hook` entry.
+  The per-session file alone isn't enough: Claude Code runs the two hooks at the same moment, and
+  both print before either records the meeting. `packaging/plugin/claude-e2e.sh` checks this in
+  a real Claude Code with a throwaway config.
+- Cursor has session and prompt hooks too, but its `additional_context` doesn't reliably reach the
+  agent yet, so madal doesn't install one there.
+- Agents without usable hooks (Claude Desktop, Cursor, Windsurf) get two more notices from the MCP
+  server itself. When it starts, the server's instructions add a line naming the waiting meetings:
+  the count and up to 3 titles from `meetings-pending`, never ids, and to ask the user early on
+  whether to summarize them. The server waits up to 300 ms for its startup recount, then reads
+  the file as it is, and leaves the line out when the file is missing (signed out, or nothing
+  ever counted) or more than a day old. The instructions are fixed for the connection, so a
+  meeting published mid-session still reaches these agents only through the reply line.
+  The `summarize-meetings` prompt (argument `meeting`: an id or part of a title) is the user
+  asking: it lists the `transcript_only` meetings from the server when signed in, else from
+  `meetings-pending`, with ids and titles, and the steps from the skill. `meeting-action-items`
+  is fixed text asking the agent to list the unresolved "Action item:" threads on summarized
+  meetings.
 
 ## Out of scope for v0
 

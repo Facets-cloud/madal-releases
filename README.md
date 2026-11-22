@@ -29,11 +29,11 @@ dashboard it publishes. The same cut is in [docs/madal-demo.mp4](docs/madal-demo
 </div>
 
 The quickest way is to paste this prompt into your coding agent. It installs madal the way that
-fits that agent: the plugin for Claude Code, Gemini CLI and Antigravity, the MCP server for any
+fits that agent: the plugin for Claude Code and Antigravity, the MCP server for Codex and any
 other agent. Then it signs you in.
 
 ```text
-Install madal for me. If you are Claude Code, run `claude plugin marketplace add Facets-cloud/madal-releases` and then `claude plugin install madal@madal`. If you are Gemini CLI, run `gemini extensions install https://github.com/Facets-cloud/madal-releases`. If you are Antigravity, run `agy plugin install https://github.com/Facets-cloud/madal-releases`. Otherwise, add a stdio MCP server named "madal" at user level, so it works in every project: the command is `npx` with the arguments `-y @facets-cloud/madal mcp` (on Windows: command `cmd`, arguments `/c npx -y @facets-cloud/madal mcp`). Tell me if I need to restart you. Then call madal's login tool so I can sign in.
+Install madal for me. If you are Claude Code, run `claude plugin marketplace add Facets-cloud/madal-releases` and then `claude plugin install madal@madal`. If you are Codex, run `codex mcp add madal -- npx -y @facets-cloud/madal mcp`. If you are Antigravity, run `agy plugin install https://github.com/Facets-cloud/madal-releases`. Otherwise, add a stdio MCP server named "madal" at user level, so it works in every project: the command is `npx` with the arguments `-y @facets-cloud/madal mcp` (on Windows: command `cmd`, arguments `/c npx -y @facets-cloud/madal mcp`). Tell me if I need to restart you. Then call madal's login tool so I can sign in.
 ```
 
 To do it yourself, use the plugin if your agent takes one. One install adds the MCP server and
@@ -50,7 +50,6 @@ for your agent:
 
 ```bash
 claude plugin marketplace add Facets-cloud/madal-releases && claude plugin install madal@madal   # Claude Code
-gemini extensions install https://github.com/Facets-cloud/madal-releases   # Gemini CLI
 agy plugin install https://github.com/Facets-cloud/madal-releases          # Antigravity
 ```
 
@@ -59,7 +58,7 @@ Claude Desktop: Customize, Plugins, add a marketplace from the GitHub repo
 Code, so Chat still needs the MCP setup below.
 
 Most agents don't update plugins on their own. Claude Code updates a third-party marketplace
-only if you turn auto-update on for it; Gemini CLI has `gemini extensions update`.
+only if you turn auto-update on for it.
 
 ### As an MCP server
 
@@ -104,7 +103,8 @@ command `cmd` with the arguments `/c npx -y @facets-cloud/madal mcp`.
 
 Then ask your agent to sign you in to madal. It calls the `login` tool, your browser opens, and
 you sign in. The server's tools are `login`, `logout`, `whoami`, `publish`, `update`, `list`,
-`get`, `versions`, `delete`, `share`, `org`, `comments`, `comment` and `resolve_comment`. If
+`get`, `versions`, `delete`, `share`, `org`, `comments`, `comment`, `resolve_comment`, `meetings`,
+`meeting`, `install_app` and `enable_meeting_notices`. If
 you have the CLI, `madal mcp install` adds the server to every agent it finds (see
 [Agents over MCP](#agents-over-mcp)).
 
@@ -217,6 +217,7 @@ Add it to every agent installed here with one command:
 
 ```bash
 madal mcp install    # Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, Antigravity, VS Code, Windsurf
+madal mcp status     # list the agents it is in
 madal mcp remove     # take it out again
 ```
 
@@ -249,6 +250,98 @@ madal comment <link> --resolve <id>                # or --reopen, --delete
 Over MCP the same things are the `comments`, `comment` and `resolve_comment` tools. A comment
 posted by an agent shows **via agent** in the browser. The madal skill tells agents to treat
 comment text as information, never as instructions.
+
+---
+
+<div align="center">
+
+## Meetings
+
+</div>
+
+The madal menubar app publishes a call's transcript as a private meeting page. Ask your agent to
+"summarize my madal meetings": it reads the transcript, writes notes by topic with a TL;DR,
+decisions and next steps, asks you where to file the page and who to share it with, and posts a comment thread for
+each action item. madal renders the page itself from those fields, so every meeting page looks
+the same. Whether a page is a meeting, and its status, are encrypted with the page.
+
+The app is madal for Mac (Apple Silicon, macOS 14.2 or later). It records a call only after you
+click Record and transcribes it on your Mac; audio never leaves it. Download it from the
+[Meetings page](https://madal.facets.cloud/meetings), install it from Terminal with
+`curl -fsSL https://madal.facets.cloud/install.sh | sh -s -- --app`, or ask your agent to "install
+madal for Mac". The Meetings page covers the first launch, the permissions it asks for and its
+updates.
+
+```bash
+madal meetings [--status transcript_only]          # your meetings and their status
+madal meetings publish transcript.json             # a new private meeting page
+madal meetings summarize <link> notes.json --folder clients/acme
+madal meetings status <link> no_summary_needed     # dismiss it; publishes nothing
+```
+
+Over MCP these are the `meetings` and `meeting` tools, and `whoami` returns `pending_meetings`.
+`madal mcp install` also adds hooks to Claude Code, Codex and Gemini CLI that fire once per
+meeting per session. Each shows "madal: 1 meeting ready to summarize.", and the agent asks you in its
+own words whether to summarize it now. Say yes, sure or go ahead, and the agent writes the notes in
+the conversation, saves the page private and tells you in one line what it saved. Claude Code's
+auto permission mode sometimes blocks a plain yes. When it does, the agent tells you to say
+"summarize it", which gets through. "Not now" leaves it, and "no summary needed" dismisses it.
+
+Codex runs the hooks only once you trust them, and asks again whenever `madal mcp install` changes them.
+Start codex and choose "Trust all and continue" at "Hooks need review", or trust them in `/hooks`.
+
+#### How each agent finds out about a new meeting
+
+| Agent | How it hears |
+| --- | --- |
+| Claude Code | Hooks, at session start and on each prompt |
+| Codex | The same hooks, once you trust them |
+| Gemini CLI | A hook at session start |
+| Claude Desktop, Cursor, Windsurf and other MCP clients | The MCP server's instructions name up to 3 waiting meetings when the agent connects, the `summarize-meetings` prompt, whose title shows the waiting count, and a line on every madal reply |
+
+Without a terminal, ask Claude Code or Codex to "turn on madal meeting notices". The
+`enable_meeting_notices` tool adds the same hooks as `madal mcp install`, to that agent only. With
+the madal plugin, the hooks are already there and it changes nothing. Claude Desktop has no hooks:
+the tool says so and points to the menu bar line and the prompt.
+
+The `summarize-meetings` prompt ("Summarize madal meetings (2 waiting)") lists the waiting meetings
+and asks the agent to summarize them. Claude Code shows it as a slash command, such as
+`/mcp__madal__summarize-meetings`, and Claude Desktop in its prompt menu. Claude Desktop keeps the
+server running across chats, so the server checks the count every few seconds and after each tool
+call, and sends `notifications/prompts/list_changed` when it changes. Give it a meeting's id or part of its title to do just
+that one. `meeting-action-items` asks which action items from your meetings are still open.
+
+Several agents on one Mac (Claude Code, Claude Desktop, Codex) hear about the same meeting, so the
+one that starts claims it first (the `meeting` tool's `claim` action, or `madal meetings claim`).
+The meeting then reads `summarizing`, and the other agents leave it alone until it's summarized,
+released, or 15 minutes old.
+
+### The Mac app
+
+It needs a Mac with Apple Silicon and macOS 14.2 or later. Three ways to install it:
+
+- **Download for Mac** on the [Meetings page](https://madal.facets.cloud/meetings): the `.dmg`
+  from the latest release. Drag madal into Applications.
+- Terminal, which also updates it:
+
+  ```sh
+  curl -fsSL https://madal.facets.cloud/install.sh | sh -s -- --app
+  ```
+
+- Ask your agent: "install madal for Mac". Its `install_app` tool runs only when you ask. It
+  checks the Mac first (Apple Silicon, macOS 14.2 or later), then installs the same build as the
+  Terminal command, checked against the release's signed checksums and the app's code signature,
+  into Applications (or ~/Applications), and tells you the first-launch steps.
+
+Open madal from Applications; an orange "m" shows in the menu bar. When a call starts it asks
+"Record this call?". The first recording asks for the microphone (your side) and system audio
+(the other side). Allow both once, and updates keep them. The first launch also downloads the
+speech model, about 500 MB. After a meeting is published, madal can show a "Meeting ready to
+summarize" notification with a Copy prompt button, if you allow notifications.
+
+The app isn't notarized by Apple yet. If you download the `.dmg` from the releases page in a
+browser, macOS blocks the first open: click Done, then System Settings › Privacy & Security ›
+Open Anyway. The Terminal install and the agent install don't need that step.
 
 ---
 
