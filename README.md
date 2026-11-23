@@ -198,6 +198,11 @@ madal get <link> --version 2 -o v2.html     # an earlier version
 madal delete <link-or-id>
 ```
 
+`update` builds on the latest version this machine published or opened (`get`, `diff`,
+`publish`, `update`). If someone else published a newer one since, or this machine never opened
+the page, it refuses and changes nothing; get the latest, edit that, and update again.
+`--force` publishes on top anyway and replaces their version.
+
 ### Agents over MCP
 
 `madal mcp` runs an MCP server on stdin and stdout, so an agent can do what the CLI does: publish,
@@ -363,7 +368,15 @@ madal share <link-or-id> --remove bob@example.com
 madal share <link-or-id> --remove org           # stop sharing with your org
 madal share <link-or-id> --link                 # anyone with the full link
 madal share <link-or-id> --restricted           # only the people you named: no link, no org
+madal share <link-or-id> --with bob@example.com --role edit   # bob can publish new versions too
 ```
+
+`--role` sets what people can do: `comment` (the default), `view`, or `edit`. An editor reads,
+comments, and publishes and restores versions with `madal update` and `madal restore`. They can't
+delete the page, share it, change roles or settings, or take it over. `edit` is for people named by
+email on a private page, never for your org. Sharing again with `--role comment` or `view`, or
+removing them, stops their updates at once. When a removal means the page needs a new key, only you
+can publish the next version. An editor keeps the role if they leave your org, until you change it.
 
 You can share with anyone's email. If they don't use Madal yet they're invited, and madal prints
 an invite link for each person. Send each one their own link: it opens as soon as they sign up

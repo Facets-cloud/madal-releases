@@ -1073,8 +1073,45 @@ two kept versions, Google Docs style. Full design: `docs/design/page-history.md`
   `diff -u` text. Fetching an older version to compare counts as an open, as viewing it does.
 - **Since you last looked.** The browser keeps the last version it showed per page in
   `localStorage`, and offers the comparison when the page has moved on. It never reaches the server.
-- **Restore.** Owner only: the client re-encrypts an old version under the current key (and
-  password) and publishes it as a new version noted "Restored vN".
+- **Restore.** Owner, managing admins and editors: the client re-encrypts an old version under
+  the current key (and password) and publishes it as a new version noted "Restored vN".
+- **Editors** (2026-11-23). A grant to a person by name on a private page can have the role
+  `edit`. Editors publish versions and restore old ones; their client encrypts under the page's
+  current key, which their grant carries like any reader's, and seals the title the same way.
+  The server lets them `PUT .../versions/{n}` and `PUT .../title`, records them as the author,
+  and counts the version against their own account's limits. Every other owner route (delete,
+  grants and roles, invites, tier, limits, link token, show-owner, meta, folders, take-over)
+  checks `manages`, which an editor doesn't pass, so it answers them 404 as it answers any
+  reader. Three more checks are theirs alone. While a rotation is pending the server refuses
+  their version with 403 "the owner has to publish the next version": only the owner's or a
+  managing admin's device re-wraps the new key for everyone. A version can't add or drop the
+  password. And `edit` on an org or team grant, or on a link page, is a 400, as is inviting by
+  email with `edit` to a link page. Changing the role to `view`/`comment`, or deleting the
+  grant, stops the next update at once. Deleting it also sets `rotate`, as for anyone. A by-name
+  grant isn't tied to an org, so an editor who leaves or is removed from the org stays an editor
+  until the owner changes that; org removal hands over only the leaver's own pages.
+  `GET /api/artifacts/{id}` answers `edit: true` to an editor, so the viewer shows them Restore.
+  The CLI (`madal share --role edit`), MCP `share` (`role: edit`) and the web Share sheet ("Can
+  edit", in a person's role menu on a private page) set it.
+- **Inbox notice for an editor's version.** The artifact keeps `latest_author`. The owner's lists
+  (`GET /api/artifacts`, with or without `?since=`) and an editor's shared list send
+  `latest_by`, the editor's name, when an editor published the latest version and the caller
+  didn't. The browser makes it an Inbox item `edit:<page id>:<version>`, kind "edited", shown as
+  "<name> published v<N>" under the page title, which it opens with the page key as for every
+  row.
+- **Updates build on the latest seen** (2026-11-23). An update used to read the server's latest
+  and put latest+1, so a stale local file silently replaced a newer version someone else
+  published. Now each machine keeps `seen.json` next to its records: per page, the latest version
+  it published or opened (`publish`, `update`, `get` or `diff` of the latest). An update goes up
+  only as seen+1; if the page has moved past that, the client stops before encrypting anything
+  and says who published the newer version and when (from the history). With no entry, it goes
+  ahead only when the latest version is the caller's own (a machine, or a CLI from before this,
+  that didn't keep one); otherwise, an org admin's first update for instance, it asks for a `get`
+  first. The server's `PUT .../versions/{n}` already refuses n other than latest+1 with 409, which
+  catches two updates racing past the check. `--force` (`force` in MCP, `Doc.Force` in the SDK)
+  puts the version on top of whatever is latest, as before. Restore and changing the password
+  always do: both re-encrypt a version the client just read. The server needs no new header,
+  since n already names the base.
 
 ## Comments
 
@@ -1100,7 +1137,8 @@ anchor = {exact, prefix, suffix}                      a passage (W3C text quote)
   browser the first time the owner opens the page, so knowing a page id isn't enough. Public and
   password-protected pages take no comments.
 - Roles (2026-11-22). Each grant, by name or to an org or team, has a role: `comment` (the
-  default, and what a grant from before roles, with none, means) or `view`. A `view` grantee reads
+  default, and what a grant from before roles, with none, means) or `view`. A person's grant on a
+  private page can also be `edit`, which comments too (see Editors under Page history). A `view` grantee reads
   the page and its comments, and deletes their own, but the server refuses (403, "you can view
   this page but not comment on it") their posts, replies, resolves and reopens. With several
   grants (by name and through an org) the strongest role wins; the owner and managing org admins
