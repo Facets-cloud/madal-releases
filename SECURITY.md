@@ -26,7 +26,10 @@ Include what you found, how to reproduce it, and what an attacker gains. A proof
 These are documented trade-offs, not vulnerabilities:
 
 - The viewer's JavaScript is served by the Madal server, which therefore has to be trusted not to
-  serve code that reads keys.
+  serve code that reads keys. Each release signs a manifest of every shell page and script, and
+  `madal verify` checks the live site against it (production is checked after every release and weekly). That makes a
+  change served to everyone detectable. It doesn't catch code served to a single browser, and it
+  doesn't stop someone who holds both the release signing key and deploy rights.
 - Public pages are plaintext on purpose.
 - The first share with a person trusts the server to provide their real public key.
 - Anyone holding a full link can open a link-shared artifact.

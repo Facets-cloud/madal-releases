@@ -229,6 +229,64 @@ Threat notes:
 - iOS Safari is untested. A top-level print window avoids the iframe print bug there, and Share >
   Print stays as the fallback.
 
+## Checking the shell
+
+The viewer, vault and sign-in pages, and the scripts they load, come from the app server. Whoever
+can deploy it could ship a script that reads keys. Each release now signs a list of exactly what
+the shell serves, so anyone can check the live site against it.
+
+The manifest (`internal/manifest`) maps each path to the SHA-256 of the response body. madald
+builds it by requesting its own routes in process (`Server.Manifest`), so it hashes the bytes the
+server sends, after link versioning and the `{{AppOrigin}}` swap, and can't drift from them. It
+lists:
+
+- the shell pages as a visitor without a session gets them: `/` (the landing page), `/a/x`,
+  `/m/x`, `/t/x`, `/o/x` (one id stands for all; the page doesn't depend on it), `/cli/login`,
+  `/cli/done`, `/signin`, `/vault`, `/privacy`, `/security`, `/meetings`, and `/install.sh`;
+- every file under `/s/<version>/`: scripts, styles, fonts, images and the vendored Firebase SDK.
+
+It names what it leaves out, and why, in `excluded`:
+
+- `/` with a session cookie serves `dashboard.html`, the same bytes as the listed
+  `/s/<version>/dashboard.html` (a test keeps that true).
+- `/p/{id}` renders the page's own title and description. Public pages are plaintext and hold no
+  keys.
+- `/admin` and its script answer only a signed-in madal admin, so an outside checker can't fetch
+  them.
+- `/static/...` are the unversioned files for pages cached before versioning. No current page
+  links them.
+- `/d/<version>/...` is the landing page's demo player, sandboxed to an opaque origin.
+- The content origin (`/frame`, `/frame/print`, `/p/{id}/raw`) shows decrypted pages but never
+  gets a key.
+
+The manifest's `version` is the asset version, a hash of every embedded web file. The same web
+files give the same manifest whichever release carries them, and any change to web/ gives a new
+version. madald serves its own manifest at `/.well-known/madal-manifest.json`. A checker trusts
+only the version in it.
+
+release.yml builds the manifest for `https://madal.facets.cloud` with `madald manifest`, signs it
+with `RELEASE_SIGNING_KEY` the way it signs checksums.txt, and commits it to madal-releases as
+`manifests/<version>.json` and `.json.sig`, before the deploy. The release also attaches both as
+`madal-manifest.json` and `.sig`.
+
+`madal verify [--url]` reads the version from the site, fetches that manifest and signature from
+madal-releases (never from the site), checks the signature against the keys pinned in
+`internal/upgrade/sign.go`, then fetches every listed path from the site and compares hashes. It
+prints each path that differs or is missing and exits non-zero. A site running web files with no
+signed manifest fails too. `.github/workflows/verify.yml` runs it against production after every release and once a week.
+
+What it shows: the server sends everyone the released shell, and anyone can check that without
+trusting madal. What it doesn't:
+
+- A targeted attack. The server can send one browser different code than it sends the checker.
+  Only a check inside the browser catches that, which is the verifier extension.
+- Someone who holds both `RELEASE_SIGNING_KEY` and deploy rights can sign and ship a bad shell.
+  The manifest makes that change public in madal-releases, but doesn't stop it.
+- A server-only deploy (deploy.yml run by hand) that changes web/ has no signed manifest, so the
+  next check fails until the next release. That's on purpose: unreleased web code is unverified.
+- Headers aren't hashed, CSP included. The pages hold no inline script (a test checks), and
+  `script-src 'self'` stays as it is.
+
 ## Accounts and tokens
 
 - **Web sign-in.** Google, GitHub or an emailed magic link, through Firebase Authentication with
@@ -1403,6 +1461,8 @@ Blog mode, workspaces, live updates, remote MCP, the verifier extension, paid pl
 ## Known limits
 
 - The viewer JS comes from the server. A malicious operator could ship JS that leaks the
-  fragment. That is the standard limit of browser E2EE. The planned verifier extension is the
-  answer, and v0 does not claim to solve it.
+  fragment. That is the standard limit of browser E2EE. The signed shell manifest and `madal
+  verify` (see "Checking the shell") make a change that everyone gets detectable by anyone. They
+  can't catch code served to one browser only, which is what the planned verifier extension is
+  for, and they don't stop whoever holds both the release key and deploy rights.
 - Public-tier OG cards are text only (title and description). Image cards come later.

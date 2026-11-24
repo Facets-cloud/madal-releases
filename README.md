@@ -494,7 +494,9 @@ Exact formats are on the [security page](https://madal.facets.cloud/security).
   might travel further than you intend.
 - Public pages (`--public`) are plaintext by design, so links unfurl in chat apps.
 - The viewer's JavaScript is served by the Madal server, which could in principle serve code that
-  reads keys. A verifier extension is planned.
+  reads keys. Each release signs a list of every page and script the site serves, and
+  `madal verify` checks the live site against it, so a change everyone gets shows up. It can't see
+  code sent to one browser only; a verifier extension is planned for that.
 - The first time you share with someone, you trust the server to hand you their real key, unless
   you compare fingerprints with them. After that your devices remember it and stop if it changes.
 
