@@ -1,6 +1,6 @@
 {
   "name": "madal",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
   "contextFileName": "GEMINI.md",
   "mcpServers": {
