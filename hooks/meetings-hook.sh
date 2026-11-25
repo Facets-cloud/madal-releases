@@ -1,5 +1,6 @@
 #!/bin/sh
-# madal plugin hook: says when a madal meeting is ready to summarize. Claude
+# madal plugin hook: says when a madal meeting is ready to summarize, or replies
+# wait on a comment thread the session asked on (hook input on stdin). Claude
 # Code runs it at SessionStart and UserPromptSubmit, Gemini CLI at
 # SessionStart, with the event as $1. It finds the madal profile as the madal
 # CLI does and runs the hook script the madal MCP server keeps in that

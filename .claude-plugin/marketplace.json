@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "Publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
-    "version": "0.8.0"
+    "version": "0.9.0"
   },
   "plugins": [
     {
       "name": "madal",
       "source": "./",
       "description": "Publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
-      "version": "0.8.0"
+      "version": "0.9.0"
     }
   ]
 }
