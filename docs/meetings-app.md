@@ -19,6 +19,8 @@ curl -fsSL https://madal.facets.cloud/install.sh | sh -s -- --app
 It checks the download and puts madal in Applications. On a Mac older than macOS 14.2 it stops
 and says so.
 
+`--all` in place of `--app` also installs the `madal` command line tool and its agent skill.
+
 Or ask your agent: "install madal for Mac". madal's `install_app` tool checks the Mac, installs
 the same checked build as the Terminal command into Applications (or ~/Applications), and tells
 you the steps below. It runs only when you ask.
