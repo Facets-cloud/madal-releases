@@ -54,6 +54,7 @@ for your agent:
 
 ```bash
 claude plugin marketplace add Facets-cloud/madal-releases && claude plugin install madal@madal   # Claude Code
+codex plugin marketplace add Facets-cloud/madal-releases && codex plugin add madal@madal          # Codex
 agy plugin install https://github.com/Facets-cloud/madal-releases          # Antigravity
 ```
 

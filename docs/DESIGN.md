@@ -373,6 +373,7 @@ it starts (`EnsureIndexes` in internal/store/indexes.go):
 - `removals {owner_uid: 1, at: 1}` for `?since=`
 - `comments {artifact_id: 1, created_at: 1}` for a page's comments, whole or `?since=`
 - `comment_events {artifact_id: 1, at: 1}` for a page's comment events
+- `comment_events {at: 1}` with `expireAfterSeconds` 30 days, a TTL index (below)
 
 It lists each collection's indexes first and creates only the missing ones, matching on keys, so
 a start that finds them all creates nothing. Firestore takes one index per `createIndexes`, and
@@ -385,6 +386,9 @@ grant. Without it the server logs a warning and carries on. Check an index is re
 `skoop debug gcloud firestore indexes composite list --database=<database id>`.
 
 A TTL policy on `removals.expires_at` can drop old removal records. Nothing depends on it.
+Comment events expire through a TTL index on `comment_events.at` that `EnsureIndexes` creates,
+which Firestore's MongoDB API supports (one TTL index per collection, deletions within about a
+day of expiry). It needs the same `datastore.indexAdmin` grant. `comments` has no TTL index.
 `TestPollReads` in internal/store measures what each query examines on MongoDB, with and without
 the indexes.
 
@@ -1245,8 +1249,8 @@ anchor = {exact, prefix, suffix}                      a passage (W3C text quote)
   and empty otherwise. The store has no transactions, so a failed event write is logged and
   the change still stands; a reader misses a wake-up, not a comment. Each event also moves the
   page's `last_activity_at` forward with `$max`. It isn't sent to clients and doesn't touch
-  `changed_at`, so the dashboard poll doesn't see it. Events have no TTL: the 500-comment cap
-  bounds them. Deleting a page deletes its events, and deleting an account clears `actor_uid`, as
+  `changed_at`, so the dashboard poll doesn't see it. Events are kept 30 days
+  (`store.CommentEventKeep`), then a TTL index on `at` drops them; comments never expire. Deleting a page deletes its events, and deleting an account clears `actor_uid`, as
   it clears `author_uid` on comments.
   `GET /api/artifacts/{id}/comment-events?since=<cursor>` has the same gate as `GET .../comments`
   and answers `{events, cursor, full, poll_after_ms}`. Each event carries `id`, `type`, `cause`,
@@ -1255,7 +1259,8 @@ anchor = {exact, prefix, suffix}                      a passage (W3C text quote)
   exists carries it sealed, as `comment_body {parent, version, key_gen, body}`. The cursor works as
   for `?since=` on the comment list, with the same two-minute look-back; events at the same time
   sort a reopen first and a thread's own deletion last, and the client drops ids it has seen. The
-  answer is `full` with no cursor, with more than 500 events since it (the newest 500 come), and
+  answer is `full` with no cursor, with a cursor older than the 30 days events are kept, with
+  more than 500 events since it (the newest 500 come), and
   when the log may not reach back to the cursor: the page has comments but no events, or its first
   event is after the cursor and some other comment is older than that event. Those comments
   predate the log. A full answer starts with a snapshot, a `created` event (id `snap:<comment
