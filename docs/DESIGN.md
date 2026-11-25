@@ -333,8 +333,11 @@ cli_codes  {_id: sha256(code), uid, challenge, expires_at}
 artifacts  {_id, owner_uid | null, edit_token_hash | null, tier, latest,
             password: {salt, iterations} | null, title (public only),
             description (public only), key_gen, rotate, first,
-            created_at, updated_at, changed_at, last_comment_at, expires_at | null}
+            created_at, updated_at, changed_at, last_comment_at, last_activity_at,
+            expires_at | null}
 removals   {_id: "<owner uid>/<artifact id>", owner_uid, artifact_id, at, expires_at}
+comment_events {_id, artifact_id, thread_id, comment_id, type, cause, actor_uid,
+            via_agent, at}
 versions   {_id: "<id>/<n>", artifact_id, n, size, object, key_gen, created_at,
             note (sealed) | null, author_uid, via_agent, pruned}
 reports    {_id, artifact_id, reason, key_included, created_at, ip_hash}
@@ -369,6 +372,7 @@ it starts (`EnsureIndexes` in internal/store/indexes.go):
 - `artifacts {owner_uid: 1, changed_at: 1}` for `?since=`
 - `removals {owner_uid: 1, at: 1}` for `?since=`
 - `comments {artifact_id: 1, created_at: 1}` for a page's comments, whole or `?since=`
+- `comment_events {artifact_id: 1, at: 1}` for a page's comment events
 
 It lists each collection's indexes first and creates only the missing ones, matching on keys, so
 a start that finds them all creates nothing. Firestore takes one index per `createIndexes`, and
@@ -1232,6 +1236,116 @@ anchor = {exact, prefix, suffix}                      a passage (W3C text quote)
   few pages with new comments and decrypt only those. None of it is new to the server: it already
   stores each comment's page, author and time, and each grant's time. `last_comment_at` is the
   newest of those times, kept on the page.
+- Comment events (2026-11-25), so a reader such as an agent waiting for a reply can ask what
+  happened since it last looked, deletions and resolves included. Every post, delete, resolve and
+  reopen writes a `comment_events` record after the change itself: type `created`, `deleted`,
+  `resolved` or `reopened`, the thread, the comment, who did it, `via_agent` and the time by the
+  server's clock. Deleting a thread writes one `deleted` per reply, then one for the thread.
+  Resolving a resolved thread again writes nothing. `cause` is `reply` on a reopen a reply caused,
+  and empty otherwise. The store has no transactions, so a failed event write is logged and
+  the change still stands; a reader misses a wake-up, not a comment. Each event also moves the
+  page's `last_activity_at` forward with `$max`. It isn't sent to clients and doesn't touch
+  `changed_at`, so the dashboard poll doesn't see it. Events have no TTL: the 500-comment cap
+  bounds them. Deleting a page deletes its events, and deleting an account clears `actor_uid`, as
+  it clears `author_uid` on comments.
+  `GET /api/artifacts/{id}/comment-events?since=<cursor>` has the same gate as `GET .../comments`
+  and answers `{events, cursor, full, poll_after_ms}`. Each event carries `id`, `type`, `cause`,
+  `page`, `thread`, `comment`, `at`, and the actor as `author`, `author_email` (masked as in the
+  comment list), `author_key`, `mine` and `via_agent`. A `created` event whose comment still
+  exists carries it sealed, as `comment_body {parent, version, key_gen, body}`. The cursor works as
+  for `?since=` on the comment list, with the same two-minute look-back; events at the same time
+  sort a reopen first and a thread's own deletion last, and the client drops ids it has seen. The
+  answer is `full` with no cursor, with more than 500 events since it (the newest 500 come), and
+  when the log may not reach back to the cursor: the page has comments but no events, or its first
+  event is after the cursor and some other comment is older than that event. Those comments
+  predate the log. A full answer starts with a snapshot, a `created` event (id `snap:<comment
+  id>`) for every live comment and a `resolved` one (`snap:<thread id>:resolved`) for every
+  resolved thread, followed by the real events. The client diffs it by comment id, so old comments
+  don't come back as new. `poll_after_ms` is the shortest wait the server asks for between checks,
+  3000 unless `POLL_FLOOR_MS` on the app server raises it, which sheds load without a client
+  release. Nothing about `GET .../comments` changed: a golden test
+  (`TestCommentsListUnchanged`, written before the log) holds its answer, whole and `?since=`.
+- `POST /api/comment-events {pages: [{id, since, proof?, link_token?}]}` (2026-11-25) checks up to
+  50 pages in one call, for a watcher waiting on replies in many places, and answers `{pages: [{id,
+  status, events, cursor, full}], poll_after_ms}` in the order asked. Each page goes through the
+  same gate as the GET, with a link page's proof and link token in the body. Any refusal is
+  `status: "gone"` with nothing else, so a deleted page, a lost grant, comments turned off and an
+  id that never existed look the same. A store error fails the whole call instead, so a blip
+  doesn't end a wait. A page whose `last_activity_at` is older than its cursor less the look-back
+  answers `events: []` without reading events, so a quiet page costs one page read, plus the
+  grant read a private page needs. A page with no events yet skips that shortcut, since it may
+  hold comments from before the log. The handler authenticates once and hands the caller to each
+  page's gate on the request context, instead of reading the token again per page. Each account
+  gets 60 calls a minute (`cev/u/<uid>`); the 61st answers 429 with `poll_after_ms` of at least
+  a minute.
+- A reply on a resolved thread reopens it (2026-11-25), as done by the replier: `resolved` and
+  `resolved_by` are cleared as the Reopen button clears them, and the events read `reopened` with
+  `cause: "reply"`, then the reply's `created`, both at the reply's time. If the reopen can't be
+  stored the reply still stands, under a thread that stays resolved. The viewer keeps the reply box
+  on resolved threads, labelled "Reply to reopen", so a person's reply reopens a thread the same
+  way an agent's does. `GET .../comments` doesn't say why a thread is open, so the viewer also reads
+  `GET .../comment-events` on each refresh, keeps each thread's latest resolve or reopen, and shows
+  "Reopened by <name>'s reply" on the thread and in its hover tip until it's resolved again. A
+  viewer from before this, or one talking to an older server, shows an open thread.
+- Waiting for replies (2026-11-25), on the client. A wait follows one thread for one agent session
+  and lives in the profile's folder as `waits/<id>.json`, replaced atomically, with changes under a
+  lock on `waits/.store-lock`. It records its owner (harness and session, from
+  `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, `PRAXIS_SESSION_ID` or `GEMINI_SESSION_ID`, else the
+  terminal), the page and thread, `own_ids` (comments posted through it, added before the POST so
+  a reader never takes its own post for a reply), `known_ids` (every comment on the thread it has
+  learned of, to diff snapshots), the thread's state, the events cursor, the event ids `seen` in
+  the look-back, and `pending`, the events queued for its reader with replies still sealed. A
+  wait arms from a snapshot (`GET .../comment-events` with no cursor), so nothing already on the
+  thread counts as new. Matching: a `created` on the thread that isn't the wait's own and passes
+  its `from` filter queues a `reply`; a `resolved` or `reopened` always queues, with `cause`; a
+  deleted reply queues `deleted`; a deleted thread, or a page the batched check calls `gone`,
+  queues `gone` and ends the wait. Each queued event carries provenance from the server's fields
+  only: `you` (`mine`, not via agent), `your_agent` (`mine`, via agent), `known` (an unmasked
+  email) or `other` (masked). Events older than the wait's cursor less the look-back are history
+  and are dropped, which also keeps a page checked from an older wait's cursor from replaying
+  what a newer wait already had. A full answer is diffed by comment id, and a resolve or reopen
+  the snapshot shows but no event delivered is queued from the snapshot. Replies are decrypted
+  when a reader takes them, and the text goes to the agent as `untrusted_text`. Keys never go in
+  the file: a link page this machine holds no record for keeps its full link in the OS keychain
+  under the wait's id (`madal-wait-links`), and a machine without a keychain can't wait on such a
+  page. A wait ends only on cancel or gone, never on time; ended waits stay as history, the
+  newest 1000. `pending` holds at most 200 events, folding the oldest replies into a count.
+- The watcher (2026-11-25), `madal watch`, fills the waits. Any command that arms or reads a wait
+  starts it detached unless one runs; one per profile holds a lock on `waits/.lock`, and a second
+  exits. It reads the wait files every second, which costs nothing on the network, groups armed
+  waits by page and calls `POST /api/comment-events` only for pages that are due: every 3 s for two
+  minutes after activity on any wait on the page (an event, or a post through a wait), every 10 s
+  until ten minutes, every 30 s until a day, then every 5 minutes. A call takes at most 50 pages,
+  the longest unchecked first, so more spread over the next calls, and calls are never closer
+  than the answer's `poll_after_ms`. A call that goes out anyway also takes pages at least half-way to due,
+  room permitting, so pages fall due together and quiet waits cost a call per interval rather
+  than one per page. A 429 waits its `poll_after_ms`; other errors back off from 6 s
+  doubling to 5 minutes. A page is sent with the oldest cursor among its waits, and every 30
+  minutes with none, so the snapshot heals any event the server failed to write. Waits never
+  expire, so an armed one keeps a watcher running; it stops ten minutes after the last wait ends,
+  on a 401, or when the folder goes. After each pass it rewrites `waits/pending`, one line per
+  wait with undelivered events (id, harness, session, count, the time the oldest came, the page's
+  title and up to three author names, all through `hookTitle`; never comment text), for the hook.
+  It logs one line per call to `waits/watch.log`. Sign-out deletes `waits/` and the kept links.
+- Waiting over MCP (2026-11-25). `comment` takes `wait` (start a wait on the thread it posts to) or
+  `wait_id` (post through one) and returns at once with `wait_id`. `wait_for_reply` blocks on a
+  wait, or arms one on `link` and `thread`, for `timeout_seconds` (240, at most 300, as tool calls
+  shouldn't run longer), sending a progress notification every 15 s when the call has a progress
+  token. A timeout returns no events and leaves the wait armed. `waits` lists (this session's by
+  default) and cancels. The server owns its waits as the harness the client names in
+  `clientInfo`, with the session from its environment when the harness put one there, else an id
+  minted once per server process, which lives as long as the agent session that started it. Every
+  other tool reply carries one line per wait of this session with replies queued, read from
+  `waits/pending`: "madal: 2 new on 'Q3 plan' (wait w_…). Read them with wait_for_reply."
+- Waits in the agent hook (2026-11-25). The profile's hook script (`meetings-hook.sh`, the one
+  `madal mcp install` and the plugin run for Claude Code, Codex and Gemini CLI) also reads
+  `waits/pending`. It reads `session_id` from the hook input on stdin; Claude Code and Codex
+  (checked on codex-cli 0.172.0's hook schema, SessionStart and UserPromptSubmit) both send it. A
+  line whose harness is this agent and whose session is this one is said, once per count
+  (`waits/hook-sessions/<session>`), as "madal: 2 new on "Q3 plan" from Alice Rao (wait w_…). Read
+  them: madal comments wait --wait-id w_… --timeout 0". A line whose oldest event has waited a
+  day is an orphan, its session likely over, and any session's start says it. At most five
+  lines, then "and N more". It prints ids, counts, titles and names, never comment text.
 - A comment posted with a madal token in the `Authorization` header (the CLI, SDK or MCP server)
   is stored with `via_agent`; the browser sends its session cookie instead. The viewer shows a
   "via agent" badge next to the author, so readers know a program posted it for that person.
