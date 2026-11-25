@@ -13,12 +13,21 @@
 # madal-Meetings-<version>.zip, checks it against its .sha256 file from the same release, and
 # puts madal.app in $MADAL_APP_DIR (default /Applications when writable, else ~/Applications).
 # A download with curl isn't quarantined, so macOS opens the app without asking for Open Anyway.
+#
+#   curl -fsSL https://madal.facets.cloud/install.sh | sh -s -- --all
+#
+# installs everything in one go: the binary, the agent skill (madal skills install, into each
+# agent found under your home) and, on a Mac that can run it, the madal Meetings app. On any
+# other machine it says why it skipped the app and installs the rest.
 set -eu
 
+cli=1
 app=0
+skill=0
 for arg in "$@"; do
   case "$arg" in
-    --app) app=1 ;;
+    --app) cli=0 app=1 ;;
+    --all) cli=1 app=1 skill=1 ;;
     *) echo "madal install: unknown option $arg" >&2; exit 1 ;;
   esac
 done
@@ -48,18 +57,28 @@ case "$(uname -m)" in
   *) fail "unsupported CPU $(uname -m)" ;;
 esac
 
-if [ "$app" = 1 ]; then
-  [ "$os/$arch" = darwin/arm64 ] || fail "the madal app needs a Mac with Apple Silicon"
+# Why this machine can't run the madal app, or nothing when it can.
+app_unsupported() {
+  [ "$os/$arch" = darwin/arm64 ] || { echo "the madal app needs a Mac with Apple Silicon"; return; }
   # 14.2 is the first macOS with the system audio capture the app records calls with.
   macos=$(sw_vers -productVersion 2>/dev/null || true)
   major=${macos%%.*}
   minor=0
   case "$macos" in *.*) minor=${macos#*.}; minor=${minor%%.*} ;; esac
   case "$major.${minor:-0}" in
-    *[!0-9.]* | .*) fail "couldn't read the macOS version (sw_vers -productVersion said '$macos')" ;;
+    *[!0-9.]* | .*) echo "couldn't read the macOS version (sw_vers -productVersion said '$macos')"; return ;;
   esac
   if [ "$major" -lt 14 ] || { [ "$major" -eq 14 ] && [ "${minor:-0}" -lt 2 ]; }; then
-    fail "the madal app needs macOS 14.2 or later; this Mac runs macOS $macos. Update macOS in System Settings > General > Software Update."
+    echo "the madal app needs macOS 14.2 or later; this Mac runs macOS $macos. Update macOS in System Settings > General > Software Update."
+  fi
+}
+
+if [ "$app" = 1 ]; then
+  why=$(app_unsupported)
+  if [ -n "$why" ]; then
+    [ "$cli" = 1 ] || fail "$why"
+    echo "Skipping the madal app: $why"
+    app=0
   fi
 fi
 
@@ -77,7 +96,7 @@ sha256() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
 
-if [ "$app" = 1 ]; then
+install_app() {
   need ditto
   zip="madal-Meetings-${version#v}.zip"
   echo "Downloading the madal app $version"
@@ -100,6 +119,10 @@ if [ "$app" = 1 ]; then
   echo "Installed $dest/madal.app"
   echo "If madal was running, quit it from its menu and open it again."
   echo "Next: open \"$dest/madal.app\", then allow the microphone and system audio when macOS asks."
+}
+
+if [ "$cli" = 0 ]; then
+  install_app
   exit 0
 fi
 
@@ -124,4 +147,12 @@ case ":$PATH:" in
   *":$dir:"*) ;;
   *) echo "Add $dir to your PATH, for example: export PATH=\"$dir:\$PATH\"" ;;
 esac
+
+if [ "$skill" = 1 ]; then
+  # The binary carries the skill; this writes it into each agent's skills folder.
+  "$dir/madal" skills install
+fi
+if [ "$app" = 1 ]; then
+  install_app
+fi
 echo "Next: madal login"

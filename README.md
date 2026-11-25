@@ -28,18 +28,22 @@ dashboard it publishes. The same cut is in [docs/madal-demo.mp4](docs/madal-demo
 
 </div>
 
-The quickest way is to paste this prompt into your coding agent. It installs madal the way that
-fits that agent: the plugin for Claude Code and Antigravity, the MCP server for Codex and any
-other agent. Then it signs you in.
+The quickest way is to paste this prompt into your coding agent:
 
 ```text
-Install madal for me. If you are Claude Code, run `claude plugin marketplace add Facets-cloud/madal-releases` and then `claude plugin install madal@madal`. If you are Codex, run `codex mcp add madal -- npx -y @facets-cloud/madal mcp`. If you are Antigravity, run `agy plugin install https://github.com/Facets-cloud/madal-releases`. Otherwise, add a stdio MCP server named "madal" at user level, so it works in every project: the command is `npx` with the arguments `-y @facets-cloud/madal mcp` (on Windows: command `cmd`, arguments `/c npx -y @facets-cloud/madal mcp`). Tell me if I need to restart you. Then call madal's login tool so I can sign in.
+Set up madal for me: read https://madal.facets.cloud/setup.md (with curl if you can run commands) and follow it.
 ```
+
+[setup.md](web/setup.md) has one path per agent. Claude Code, Codex, Gemini CLI and Antigravity
+get the plugin, with auto-update turned on where the agent supports it. Other agents with a shell
+get the CLI and `madal mcp install`. An agent that can't run commands, such as Claude Desktop's
+Chat tab, tells you what to click. It installs the CLI too where it can, offers the Mac app on a
+Mac that can run it, and ends by signing you in. The prompt stays the same when setup.md changes.
 
 To do it yourself, use the plugin if your agent takes one. One install adds the MCP server and
 the madal skill. Any other agent that speaks MCP, Claude Desktop's Chat tab included, can run the
 MCP server on its own. There is also a CLI. All of them share the same account and keys on a
-machine. The home page's [install box](https://madal.facets.cloud/#install) has the same options.
+machine. [Install by hand](https://madal.facets.cloud/install) on the website has the same options.
 
 ### As an agent plugin
 
@@ -128,6 +132,15 @@ curl -fsSL https://madal.facets.cloud/install.sh | sh
 The script downloads the release for your OS and CPU, checks its SHA-256 against the release's
 `checksums.txt`, and installs `madal` into `~/.local/bin`. Pin a version with
 `MADAL_VERSION=v0.1.1`, or pick another folder with `MADAL_INSTALL_DIR`.
+
+To set up everything at once, add `--all`: the binary, the agent skill (into each agent's skills
+folder) and, on a Mac with Apple Silicon and macOS 14.2 or later, the madal Meetings app. On other
+machines it skips the app and says why. With the madal plugin in Claude Code, `/madal:install`
+runs the same command.
+
+```bash
+curl -fsSL https://madal.facets.cloud/install.sh | sh -s -- --all
+```
 
 On Windows, download the zip from [Releases](https://github.com/Facets-cloud/madal-releases/releases).
 
