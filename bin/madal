@@ -1,0 +1,14 @@
+#!/bin/sh
+# bin/madal in the madal plugin. Claude Code puts the plugin's bin/ on the
+# agent's PATH after the user's own entries, so a madal the user installed
+# runs first and this runs only when there is none on PATH. It runs the madal
+# that hooks/setup.sh installs (~/.local/bin, or %LOCALAPPDATA%\Programs\madal
+# on Windows), installing it first if the session-start hook hasn't yet. Where
+# that install can't run, it runs madal through npx.
+here=$(cd "$(dirname "$0")" && pwd)
+setup="$here/../hooks/setup.sh"
+bin=$(sh "$setup" path)
+if [ ! -x "$bin" ]; then
+  sh "$setup" cli >&2 || exec npx -y @facets-cloud/madal "$@"
+fi
+exec "$bin" "$@"

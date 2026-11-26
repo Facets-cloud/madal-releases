@@ -22,7 +22,7 @@ The user ran this command to install madal on this machine. Do it now, without a
    printed one.
 3. If it installed the app, tell the user to open madal from Applications and to allow the
    microphone and system audio when macOS asks. Only they can click those.
-4. Tell them to run `madal login` in a terminal, or to ask you to sign in, which uses the madal
-   MCP `login` tool.
+4. Tell them to run `madal login` in a terminal, or to ask you to sign in, which runs the same
+   command.
 
 Run nothing else. If the install fails, show the user the error and stop.

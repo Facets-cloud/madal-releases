@@ -1,6 +1,6 @@
 {
   "name": "madal",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
   "author": {
     "name": "Facets.cloud",
@@ -18,6 +18,17 @@
     "markdown"
   ],
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/setup.sh\"",
+            "async": true
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
