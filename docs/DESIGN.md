@@ -334,12 +334,13 @@ artifacts  {_id, owner_uid | null, edit_token_hash | null, tier, latest,
             password: {salt, iterations} | null, title (public only),
             description (public only), key_gen, rotate, first,
             created_at, updated_at, changed_at, last_comment_at, last_activity_at,
-            expires_at | null}
+            expires_at | null, legacy: {uid, n, sig} | null}
 removals   {_id: "<owner uid>/<artifact id>", owner_uid, artifact_id, at, expires_at}
 comment_events {_id, artifact_id, thread_id, comment_id, type, cause, actor_uid,
             via_agent, at}
 versions   {_id: "<id>/<n>", artifact_id, n, size, object, key_gen, created_at,
-            note (sealed) | null, author_uid, via_agent, pruned}
+            note (sealed) | null, author_uid, via_agent, pruned,
+            sig | null, commit | null, signer_uid | null}
 reports    {_id, artifact_id, reason, key_included, created_at, ip_hash}
 limits     {_id: "<scope>/<key>/<window>", count, expires_at}
 
@@ -1179,6 +1180,119 @@ two kept versions, Google Docs style. Full design: `docs/design/page-history.md`
   always do: both re-encrypt a version the client just read. The server needs no new header,
   since n already names the base.
 
+## Signed versions
+
+Agreed 2026-11-26. The server can't read pages, but until now it could write them. A grant is an
+anonymous wrap (see "Wrapping a key for someone"): anyone who knows a reader's public `E` can
+make one, and the server knows every `E`. Nothing signed a version, and "Shared by" came from the
+server. So a dishonest or breached server could make a page, wrap its key to a reader, and list it
+as shared by a colleague, or swap the grant and blob of a page the reader already has. Both open
+without a warning. This is the file-injection class Hofmann and Truong found in Sync and pCloud
+("End-to-End Encrypted Cloud Storage in the Wild", CCS 2024). It matters more here because agents
+read pages through `get`, so an injected page is a prompt injection that runs no server JS.
+
+Signing closes it. Two rules held the design: every page that opens today keeps opening, for
+every reader on every client version, and nothing already stored is rewritten. It ships in one
+release; enforcement is a server switch that starts off.
+
+**What's signed.** The device that publishes a version signs it with the author's `S` key:
+
+```
+commit  = SHA-256("madal/v1/keycommit" || EK)
+msg     = "madal/v1/version/" + id + "/" + n + "/" + key_gen + "/" + signer uid + "/"
+          + hex(SHA-256(blob)) + "/" + hex(commit)
+sig     = ECDSA-P256-SHA256(S_priv, msg), r || s (64 bytes)
+```
+
+`EK` is the key the blob is sealed under, so a password version commits to its password too. The
+commitment makes the version key-committing: AES-GCM alone isn't, so a publisher could otherwise
+build one blob that opens to different content under the different keys it wraps to different
+readers. A reader recomputes `commit` from the key it used and refuses to count a signature whose
+commitment doesn't match.
+
+The signature and commitment travel as `Madal-Version-Sig` and `Madal-Key-Commit` headers (std
+base64) on `PUT .../versions/{n}`. The server checks their sizes and stores them on the version
+record with `signer_uid`. It can't check the signature against the blob it stores without trusting
+itself, so it doesn't try. Blobs, grants and keys don't change.
+
+A reader gets the signature, `signer_uid`, `author_uid`, `owner_uid` and the legacy marker only
+where it may know who owns the page: private pages, pages that show their owner's name, and the
+page's owner, managing admins and editors. On a link page that hides its owner, the uids would
+name the owner to any signed-in reader, so they're withheld, and such a page reads as unsigned and
+unpinned: no note. A repack without the headers clears the old signature, since it can't cover
+the new blob.
+
+**Who signs.** Whoever publishes the version: the owner, a managing admin or an editor. A valid
+signature says that person published exactly this content at this id and version; it doesn't say
+they were allowed to, which stays the server's call, as it is today. The reader shows the author's
+name from the key that verified, not from the server's `author_uid`.
+
+**Old pages: backfill and legacy markers.** Two things cover what was published before signing.
+
+- **Backfill.** When the owner's client (CLI, SDK, MCP or browser) opens one of its own unsigned
+  versions, it signs it in the background after the page is shown: `PUT
+  .../versions/{n}/sig` with the two headers. This copies the lazy repack (see "Envelope format")
+  but writes only the signature, never the blob, so it isn't a one-way change. The server takes it
+  only from the owner or a managing admin and only when the version has no signature yet. A v1
+  version is repacked and signed in one step: the repack PUT carries the headers for its new blob.
+  A backfilled editor's version is signed by the owner, so it vouches for the content, and the
+  author's name on it is still the server's.
+- **Legacy markers.** The first time an account's client signs anything, it also marks every page
+  the account owns as it stands, one signature per page:
+
+  ```
+  legacy  = ECDSA-P256-SHA256(S_priv, "madal/v1/legacy/" + id + "/" + latest n + "/" + uid)
+  ```
+
+  `PUT /api/artifacts/{id}/legacy {n, sig}`, owner only, once per page. The server returns the
+  marker with the page record. A version with no signature is legacy when a valid marker from the
+  page's owner, or from that version's author, covers it (its n is at most the marker's). The
+  marker is per page so a reader never learns which other pages the owner has, and it needs no
+  blob downloads, so one run covers every page at once. The server can hide a marker but can't
+  make one.
+
+**Readers.** The CLI, MCP, SDK and browser check every version they open, and never refuse to
+open one:
+
+| What the version has | What the reader does |
+|---|---|
+| A valid signature from a person it can resolve | Opens it, pins that person as one who signs |
+| No signature, covered by a valid legacy marker | Opens it as today |
+| No signature, owner not pinned as signing | Opens it as today |
+| No signature, owner pinned as signing, no marker | Opens it with an "unverified" note |
+| A signature, commitment or marker that doesn't verify | Opens it with an "unverified" note |
+
+For an unsigned version only the owner's pin counts, not its author's. An editor who signs can't
+mark their old versions on someone else's page as legacy, so counting their pin would put a false
+note on those versions. And while the owner doesn't sign, the server can forge their page anyway.
+
+A check that can't run comes out unknown: a signer or marker whose keys can't be resolved (a
+reader with no account, or a lookup that fails), a pin lookup that fails, or keys that can't be
+read. An unknown version opens as it does today, with no note. Only a version that checked out
+is backfilled or repacked; signing one that got the note, or couldn't be checked, would vouch for
+it. The note reads "madal couldn't verify who published
+this version". Over MCP, `get` adds that line
+to its result so the agent treats the text as untrusted. The browser shows it in the notice
+banner. A signer's key resolves the way a share does: the person's pin, or the org chain, or trust
+on first use with the fingerprint (see "Trusting public keys").
+
+"Pinned as signing" is a `signs: true` field on the person pin in the trust record. A client from
+before this that rewrites the record drops the field; that only weakens the check until the next
+signed version sets it again, and it never blocks anything. Public pages aren't signed: the tier
+makes no encryption or integrity claim.
+
+**Enforcement.** With `REQUIRE_VERSION_SIG=1` on the app server, `PUT .../versions/{n}` and a v1
+repack without the headers get 426 "update madal". Reading is never gated, so an old client
+still opens everything. Service accounts have no keys, so they can't sign and the switch doesn't
+refuse them. The switch starts off and is turned on with no release once few unsigned
+versions are being published. Every client sends `Madal-Client: <kind>/<version>` (`cli`, `mcp`,
+`sdk`, `web`), and the server logs each unsigned version PUT with it, which is how we see when to
+flip the switch.
+
+**Rollback.** A server from before this ignores the headers and drops the new fields; nothing
+breaks, and versions published meanwhile are just unsigned. Restored, the server has whatever
+signatures it kept.
+
 ## Comments
 
 Agreed 2026-11-11. Readers comment on a page inside the viewer: on a passage, a whole element or a
@@ -1584,4 +1698,10 @@ Blog mode, workspaces, live updates, remote MCP, the verifier extension, paid pl
   verify` (see "Checking the shell") make a change that everyone gets detectable by anyone. They
   can't catch code served to one browser only, which is what the planned verifier extension is
   for, and they don't stop whoever holds both the release key and deploy rights.
+- Signed versions (see "Signed versions") leave three gaps. A reader who has never seen a person
+  sign can't tell a stripped signature from an old page, so it opens it as today. Until the owner
+  backfills it, an old page's content can be swapped, since a legacy marker vouches for its version
+  number and not its bytes. And a page the server forged before the owner's first signing run gets
+  marked legacy along with the real ones. Key transparency would close the first; the others
+  shrink as owners backfill.
 - Public-tier OG cards are text only (title and description). Image cards come later.
