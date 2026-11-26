@@ -1,6 +1,6 @@
 {
   "name": "madal-desktop",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "madal for Claude Desktop: publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
   "author": {
     "name": "Facets.cloud",
