@@ -36,34 +36,68 @@ Set up madal for me: read https://madal.facets.cloud/setup.md (with curl if you 
 
 [setup.md](web/setup.md) has one path per agent. Claude Code, Codex, Gemini CLI and Antigravity
 get the plugin, with auto-update turned on where the agent supports it. Other agents with a shell
-get the CLI and `madal mcp install`. An agent that can't run commands, such as Claude Desktop's
-Chat tab, tells you what to click. It installs the CLI too where it can, offers the Mac app on a
-Mac that can run it, and ends by signing you in. The prompt stays the same when setup.md changes.
+get the CLI, the skill and meeting notices. Claude Desktop can't run commands, so it tells you what
+to click. The setup offers the Mac app on a Mac that can run it, and ends by signing you in. The
+prompt stays the same when setup.md changes.
 
-To do it yourself, use the plugin if your agent takes one. One install adds the MCP server and
-the madal skill. Any other agent that speaks MCP, Claude Desktop's Chat tab included, can run the
-MCP server on its own. There is also a CLI. All of them share the same account and keys on a
-machine. [Install by hand](https://madal.facets.cloud/install) on the website has the same options.
+To do it yourself, pick the kind that's yours. [Install by hand](https://madal.facets.cloud/install)
+on the website has the same options. All of them share the same account and keys on a machine.
 
-### As an agent plugin
+### Claude Desktop
 
-The plugin bundles the MCP server and the madal skill, so the agent knows when to publish
-without being told. The server runs through npx, so restarting the agent picks up a new madal;
-the skill updates with the plugin. It needs Node.js 18 or later. Add it with the line
-for your agent:
+You chat in the Claude app and don't use a terminal. Nothing here needs Node.js.
+
+- **Chat:** download [madal.mcpb](https://github.com/Facets-cloud/madal-releases/releases/latest/download/madal.mcpb)
+  and double-click it. It's a Desktop Extension with madal built in for macOS, Windows and Linux.
+  Desktop shows it as not signed, because madal signs it with its own certificate.
+- **Cowork:** Customize, Plugins, add a marketplace from the GitHub repo
+  `Facets-cloud/madal-releases`, then install `madal-desktop`.
+- **Meetings for Mac:** on a Mac with Apple Silicon and macOS 14.2 or later, get it from the
+  [Meetings page](https://madal.facets.cloud/meetings), or ask Claude to "install madal for Mac".
+
+Then ask Claude to sign you in to madal.
+
+### Coding agents
+
+Your agent runs commands in a terminal. Add the plugin with the line for your agent:
 
 ```bash
 claude plugin marketplace add Facets-cloud/madal-releases && claude plugin install madal@madal   # Claude Code
 codex plugin marketplace add Facets-cloud/madal-releases && codex plugin add madal@madal          # Codex
+gemini extensions install https://github.com/Facets-cloud/madal-releases --auto-update          # Gemini CLI
 agy plugin install https://github.com/Facets-cloud/madal-releases          # Antigravity
 ```
 
-Claude Desktop: Customize, Plugins, add a marketplace from the GitHub repo
-`Facets-cloud/madal-releases`. The skill loads in every tab, the MCP server only in Cowork and
-Code, so Chat still needs the MCP setup below.
+Claude Code's plugin has the madal CLI and skill, and no MCP server. It installs the CLI, the
+Mac app on a Mac that can run it, and meeting notices, and needs no Node.js. The Codex, Gemini CLI
+and Antigravity plugins bundle the MCP server and the madal skill, run through npx, and need
+Node.js 18 or later.
 
 Most agents don't update plugins on their own. Claude Code updates a third-party marketplace
 only if you turn auto-update on for it.
+
+Any other agent with a shell, Cursor included, uses the CLI. Install it (see [The CLI](#the-cli)),
+then add the skill and meeting notices:
+
+```bash
+madal skills install && madal hooks install
+```
+
+To use madal over MCP instead, `madal mcp install` adds the MCP server to every agent it finds.
+
+### Other desktop chat apps
+
+LM Studio, Jan, Msty, Cherry Studio, Raycast and BoltAI run madal as a local MCP server. Install
+the CLI, then add this to the app's MCP servers (use `~/.local/bin/madal` if the app can't find
+`madal`):
+
+```json
+{
+  "mcpServers": {
+    "madal": { "command": "madal", "args": ["mcp"] }
+  }
+}
+```
 
 ### As an MCP server
 
@@ -115,24 +149,21 @@ you have the CLI, `madal mcp install` adds the server to every agent it finds (s
 
 ### The CLI
 
-```bash
-npm install -g @facets-cloud/madal
-```
-
-npm installs the one prebuilt binary that matches your OS and CPU, with no install script. It
-needs Node.js 18 or later. Then run `madal login`. To upgrade it, run the same command again.
-
-#### Other ways to install
-
-Without Node.js, use the install script:
+On macOS or Linux:
 
 ```bash
 curl -fsSL https://madal.facets.cloud/install.sh | sh
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+irm https://madal.facets.cloud/install.ps1 | iex
+```
+
 The script downloads the release for your OS and CPU, checks its SHA-256 against the release's
 `checksums.txt`, and installs `madal` into `~/.local/bin`. Pin a version with
-`MADAL_VERSION=v0.1.1`, or pick another folder with `MADAL_INSTALL_DIR`.
+`MADAL_VERSION=v0.1.1`, or pick another folder with `MADAL_INSTALL_DIR`. Then run `madal login`.
 
 To set up everything at once, add `--all`: the binary, the agent skill (into each agent's skills
 folder) and, on a Mac with Apple Silicon and macOS 14.2 or later, the madal Meetings app. On other
@@ -143,7 +174,23 @@ runs the same command.
 curl -fsSL https://madal.facets.cloud/install.sh | sh -s -- --all
 ```
 
-On Windows, download the zip from [Releases](https://github.com/Facets-cloud/madal-releases/releases).
+On Windows, in PowerShell:
+
+```powershell
+irm https://madal.facets.cloud/install.ps1 | iex
+```
+
+It does the same checks, installs `madal.exe` into `%LOCALAPPDATA%\Programs\madal` and adds that
+folder to your user Path, without admin rights. `$env:MADAL_VERSION` and `$env:MADAL_INSTALL_DIR`
+work as above; set `$env:MADAL_ALL = '1'` first to also install the agent skill. The Meetings app
+is Mac only.
+
+With Node.js 18 or later you can use npm instead, which installs the one prebuilt binary that
+matches your OS and CPU, with no install script. To upgrade it, run the same command again.
+
+```bash
+npm install -g @facets-cloud/madal
+```
 
 madal keeps itself up to date. Once a day it checks for a newer release; when there is one, a
 background process downloads it, checks the release's signed `checksums.txt` against a key built
