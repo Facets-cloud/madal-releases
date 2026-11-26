@@ -472,7 +472,7 @@ CLI notes it in `trust_seen.json` and doesn't ask again.
 
 The private halves of `E` and `S` live on the server inside a **vault**: PKCS#8 bytes sealed with
 AES-256-GCM under a random 32-byte vault key `VK`. `VK` is wrapped with a key derived from two
-secrets, as in 1Password's two-secret key derivation: the **master password** and a **Secret
+secrets: the **master password** and a **Secret
 Key**, 16 random bytes made on the user's device when the vault is created and never sent to
 the server:
 
@@ -491,7 +491,7 @@ Secret Key text  "M1-" + base32(16 bytes), grouped 6-5-5-5-5
 - Each browser keeps the Secret Key (IndexedDB) after the first unlock, and `madal login` hands it
   to the CLI's keychain with the private keys, so it's typed once per device, from the **Emergency
   Kit** the vault page shows at setup (print it, or save it in a password manager). Signing out
-  keeps it, as 1Password does; `madal logout --forget` removes it.
+  keeps it; `madal logout --forget` removes it.
 - Vaults from before Secret Keys have a `password` wrap (`W` from the password alone). The browser
   replaces it with a `secret` wrap at their next unlock: the same `VK` and account keys, so no grant
   changes, and the Emergency Kit is shown then. The server accepts exactly one of the two.
@@ -762,10 +762,19 @@ Site admin routes, which 404 for anyone else like the other admin routes:
   so members can read and export while the plan gets sorted out. Activate or comp make it work
   fully. Every action appends to `org_plan_log` (actor email, action, from, to, note, time).
 
-`seat_events` is an append-only log of `(org_id, account_id, added|removed, at)`, written where
-org membership changes: creating an org, adding a member, claiming an org invite, leaving,
+`seat_events` is an append-only log of `(org_id, account_id, email, added|removed, at)`, written
+where org membership changes: creating an org, adding a member, claiming an org invite, leaving,
 `org remove` (a rotation that removes a current member), and deleting an account. Seat counts
-over time come from it later. Nothing reads it yet.
+over time come from it later.
+
+The email is how an admin spots a returning member. Someone who deleted their account and signed
+up again with the same verified email has a new account id and new keys, so nothing else links
+them to who they were. The requests list (`GET /api/orgs/{id}/requests`) gives such a person
+`left_at`, the last `removed` event for their email, and the dashboard and `madal org requests`
+mark them "Was a member" and tell the admin to check with them before approving. The email
+outlives the account, so it's kept for `SeatEmailKeep` (a year): `RunForgetSeatEmails` unsets it
+on older events every hour, and the event stays for seat counts. The privacy page says so. Events
+from before the email was recorded don't mark anyone.
 
 Orgs made before plans existed have no record. The first request that needs one creates a trial
 starting at `PLANS_SINCE` (RFC 3339, set it to the deploy time), or at that moment if it's unset,
