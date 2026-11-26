@@ -6,20 +6,20 @@
   },
   "metadata": {
     "description": "Publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
-    "version": "0.11.0"
+    "version": "0.11.1"
   },
   "plugins": [
     {
       "name": "madal",
       "source": "./",
       "description": "Publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
-      "version": "0.11.0"
+      "version": "0.11.1"
     },
     {
       "name": "madal-desktop",
       "source": "./desktop",
       "description": "madal for Claude Desktop: publish HTML and Markdown to end-to-end encrypted links, then read and reply to comments on them.",
-      "version": "0.11.0"
+      "version": "0.11.1"
     }
   ]
 }

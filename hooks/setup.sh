@@ -7,7 +7,7 @@
 # release's checksums: install.sh into $MADAL_INSTALL_DIR (default
 # ~/.local/bin), or on Windows (Git Bash, which Claude Code's Bash tool runs)
 # install.ps1 into %LOCALAPPDATA%\Programs\madal. The release is the plugin's
-# own (v0.11.0), so no GitHub API lookup is needed; madal updates itself
+# own (v0.11.1), so no GitHub API lookup is needed; madal updates itself
 # from there. Without `cli` it then installs the madal Meetings app on a Mac
 # that can run it, once (a marker in the plugin's data folder keeps a deleted
 # app deleted), and runs `madal session-start`, which keeps the meetings hook
@@ -15,7 +15,7 @@
 # the session's way.
 mode=${1:-session}
 here=$(cd "$(dirname "$0")" && pwd)
-export MADAL_VERSION="${MADAL_VERSION:-v0.11.0}"
+export MADAL_VERSION="${MADAL_VERSION:-v0.11.1}"
 
 case ${MADAL_PLUGIN_OS:-$(uname -s)} in
   MINGW* | MSYS* | CYGWIN*) windows=1 ;;
